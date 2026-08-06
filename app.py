@@ -14,7 +14,7 @@ st.set_page_config(page_title="Restholz-Tourenplaner Sägewerk", layout="wide", 
 st_autorefresh(interval=2000, key="auto_reload")
 
 # ==========================================
-# CUSTOM CSS (FARBANPASSUNG AUSHILFSFAHRER)
+# CUSTOM CSS (FARBANPASSUNG & KALENDER-STYLES)
 # ==========================================
 st.markdown("""
     <style>
@@ -28,6 +28,30 @@ st.markdown("""
     }
     div[aria-label*="Aushilfsfahrer"] span[data-baseweb="tag"] svg {
         fill: white !important;
+    }
+    
+    /* Kalenderkarten für Wochenansicht */
+    .cal-day-header {
+        background-color: #f0f2f6;
+        padding: 8px;
+        border-radius: 6px;
+        text-align: center;
+        font-weight: bold;
+        margin-bottom: 10px;
+        border: 1px solid #dcdcdc;
+    }
+    .cal-card {
+        border-left: 4px solid #1b5e20;
+        background-color: #ffffff;
+        padding: 6px 8px;
+        border-radius: 4px;
+        margin-bottom: 6px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        font-size: 0.85em;
+    }
+    .cal-card-manual {
+        border-left: 4px solid #1976d2;
+        background-color: #f5f9ff;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -527,6 +551,7 @@ with st.expander("5. 🛠️ Manuelle Verbuchung (Eigenfuhrpark)", expanded=Fals
             "Produkt": m_prod,
             "Menge_m3": truck_cap,
             "dauer_h": m_dauer,
+            "score": 99, # Manuelle Buchungen erhalten Höchst-Score
             "is_manual": True
         })
         save_persistent_data()
@@ -536,7 +561,7 @@ with st.expander("5. 🛠️ Manuelle Verbuchung (Eigenfuhrpark)", expanded=Fals
 st.divider()
 
 # ==========================================
-# REKONSTRUIERTER PLANUNGS-ALGORITHMUS (VOLLSTÄNDIGE SLOT-BERECHNUNG)
+# PLANUNGS-ALGORITHMUS INKL. SCORE-BERECHNUNG
 # ==========================================
 bunker_levels = {
     "1 - Sägemehl": st.session_state.bunker_sm,
@@ -560,6 +585,8 @@ for b in st.session_state.booked_trips:
     b_day = b.get("Tag")
     b_truck = b.get("Fahrzeug")
     if b_day in WEEKDAYS and b_truck in TRUCK_PRIO:
+        if "score" not in b:
+            b["score"] = 99
         schedule_by_day[b_day][b_truck].append(b)
         truck_used_hours[b_day][b_truck] += b.get("dauer_h", 2.0)
 
@@ -587,6 +614,7 @@ for day in WEEKDAYS:
         prio = q_info.get("prio", 3)
         b_level = bunker_levels.get(p_name, 50)
         
+        # SCORE-BERECHNUNG (Kundenprio, Bunkerstand, Restriktionen)
         score = prio * 10
         if b_level >= 80: score += 30
         elif b_level >= 60: score += 15
@@ -622,6 +650,7 @@ for day in WEEKDAYS:
                         "Produkt": cand["Produkt"],
                         "Menge_m3": truck_cap,
                         "dauer_h": cand["dauer_h"],
+                        "score": cand["score"],
                         "is_manual": False,
                         "Bemerkung": cand["rest_req"]
                     }
@@ -634,49 +663,60 @@ for day in WEEKDAYS:
                 break
 
 # ==========================================
-# BEREICH 6: URSPRÜNGLICHE WOCHENANSICHT (TABELLE & MATRIX)
+# BEREICH 6: WOCHENKALENDER & TAGESANSICHT
 # ==========================================
-st.header("🗓️ Wochenplan & Tourenübersicht (Eigenfuhrpark)")
+st.header("🗓️ Tourenplanung & Kalenderansicht")
 
-tab_matrix, tab_tageskacheln = st.tabs(["📊 Wochenmatrix (Gesamter Fuhrpark)", "📌 Tagesansicht (Details)"])
+tab_outlook_cal, tab_tageskacheln = st.tabs(["📅 Wochenkalender (Outlook-Ansicht)", "📌 Tagesansicht (Details & Buchung)"])
 
-with tab_matrix:
-    st.subheader("Wochen-Fahrplan (Montag - Freitag)")
-    st.caption("Übersicht aller verplanten Touren pro Tag und Fahrzeug. Klicken zum Verbuchen von automatischen Vorschlägen.")
+# ------------------------------------------
+# TAB 1: WOCHENKALENDER (OUTLOOK-STYLE)
+# ------------------------------------------
+with tab_outlook_cal:
+    st.subheader("Wochenübersicht (Montag – Freitag)")
+    st.caption("Visuelle Wochenansicht im Kalenderformat mit allen eingeplanten Touren pro Fahrzeug.")
+
+    cal_cols = st.columns(5)
     
-    # Erstellung der klassischen Wochenmatrix
-    matrix_rows = []
-    for day in WEEKDAYS:
-        for t in TRUCK_PRIO:
-            trips = schedule_by_day[day][t]
-            is_blocked = t in blocked_trucks.get(day, [])
-            is_extra = t in extra_drivers.get(day, [])
+    for idx, day in enumerate(WEEKDAYS):
+        with cal_cols[idx]:
+            # Tages-Header
+            st.markdown(f"<div class='cal-day-header'>{day}</div>", unsafe_allow_html=True)
             
-            if is_blocked:
-                status_str = "❌ AUSFALL"
-                touren_text = "Fahrzeug nicht verfügbar"
-            else:
-                status_str = "🟢 Aushilfe" if is_extra else "✅ Normal"
-                if not trips:
-                    touren_text = "Keine Touren eingeplant"
+            for t in TRUCK_PRIO:
+                is_blocked = t in blocked_trucks.get(day, [])
+                is_extra = t in extra_drivers.get(day, [])
+                trips = schedule_by_day[day][t]
+                used_h = truck_used_hours[day][t]
+                max_h = shift_hours + (4.0 if is_extra else 0.0)
+                
+                # Fahrzeug-Kopfzeile
+                if is_blocked:
+                    st.markdown(f"**🚛 {t}** <span style='color:red;'>❌ Ausfall</span>", unsafe_allow_html=True)
                 else:
-                    touren_text = " | ".join([f"{tr['Kunde']} ({tr['Produkt'].split(' - ')[1]})" for tr in trips])
-            
-            used_h = truck_used_hours[day][t]
-            max_h = shift_hours + (4.0 if is_extra else 0.0)
-            
-            matrix_rows.append({
-                "Tag": day,
-                "Fahrzeug": t,
-                "Status": status_str,
-                "Anzahl Touren": len(trips) if not is_blocked else 0,
-                "Auslastung (Std.)": f"{format_hours(used_h)} / {format_hours(max_h)}",
-                "Geplante Touren": touren_text
-            })
+                    badge = "🟢" if is_extra else "✅"
+                    st.markdown(f"**🚛 {t}** {badge} <small>({format_hours(used_h)}h)</small>", unsafe_allow_html=True)
+                    
+                    if not trips:
+                        st.caption("— *Keine Touren* —")
+                    else:
+                        for trip in trips:
+                            is_man = trip.get("is_manual", False)
+                            card_class = "cal-card cal-card-manual" if is_man else "cal-card"
+                            tag_type = "🛠️" if is_man else "🤖"
+                            
+                            st.markdown(f"""
+                            <div class="{card_class}">
+                                <strong>{tag_type} {trip.get('Zeitfenster', '').split(' ')[0]}</strong> | <b>{trip['Kunde']}</b><br>
+                                <span style="color:#444;">📦 {trip['Produkt'].split(' - ')[1]}</span><br>
+                                <small style="color:#666;">⏱️ {format_hours(trip['dauer_h'])} Std. | ⭐ {trip.get('score', 0)} Pkt.</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+                st.markdown("<hr style='margin: 8px 0; border: 0; border-top: 1px dashed #ccc;'>", unsafe_allow_html=True)
 
-    df_matrix = pd.DataFrame(matrix_rows)
-    st.dataframe(df_matrix, use_container_width=True, hide_index=True)
-
+# ------------------------------------------
+# TAB 2: TAGESANSICHT (UNVERÄNDERT + SCORE BEI DAUER)
+# ------------------------------------------
 with tab_tageskacheln:
     st.subheader(f"Detailplan für {selected_day}")
     
@@ -702,13 +742,15 @@ with tab_tageskacheln:
                     for trip_idx, trip in enumerate(trips):
                         is_man = trip.get("is_manual", False)
                         badge = "🛠️ [Manuell]" if is_man else "🤖 [Vorschlag]"
+                        score_val = trip.get("score", 0)
                         
                         st.markdown(f"""
                         <div style="border:1px solid #ccc; padding:10px; border-radius:6px; margin-bottom:10px; background-color:#ffffff;">
                             <span style="font-size:0.85em; color:#555;">{badge} <strong>{trip.get('Zeitfenster', '')}</strong></span><br>
                             <span style="font-size:1.1em; font-weight:bold; color:#1b5e20;">{trip['Kunde']}</span><br>
                             <span style="color:#333;">📦 {trip['Produkt']} ({trip['Menge_m3']} m³)</span><br>
-                            <small style="color:#777;">Dauer: {format_hours(trip['dauer_h'])} Std.</small>
+                            <small style="color:#777;">Dauer: {format_hours(trip['dauer_h'])} Std.</small><br>
+                            <span style="font-size:0.85em; font-weight:bold; color:#2e7d32;">⭐ Dispo-Score: {score_val} Pkt.</span>
                         </div>
                         """, unsafe_allow_html=True)
                         
@@ -734,7 +776,7 @@ with tab_hist_eigen:
         st.caption("Alle fest verbuchten Touren des eigenen Fuhrparks. Diese Touren sind im Plan fixiert.")
         df_booked = pd.DataFrame(st.session_state.booked_trips)
         
-        display_cols = [c for c in ["Tag", "Fahrzeug", "Zeitfenster", "Kunde", "Produkt", "Menge_m3", "dauer_h", "id"] if c in df_booked.columns]
+        display_cols = [c for c in ["Tag", "Fahrzeug", "Zeitfenster", "Kunde", "Produkt", "Menge_m3", "dauer_h", "score", "id"] if c in df_booked.columns]
         st.dataframe(df_booked[display_cols], use_container_width=True, hide_index=True)
         
         c_del1, c_del2 = st.columns([3, 1])

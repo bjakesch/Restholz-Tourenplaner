@@ -1,0 +1,754 @@
+{
+    "shift_hours": 9.0,
+    "truck_cap": 103,
+    "selected_day": "Mittwoch",
+    "blocked_trucks": {
+        "Montag": [
+            "RA KH 24"
+        ],
+        "Dienstag": [
+            "RA KH 14"
+        ],
+        "Mittwoch": [
+            "RA KH 14"
+        ],
+        "Donnerstag": [],
+        "Freitag": [
+            "RA KH 24"
+        ]
+    },
+    "extra_drivers": {
+        "Montag": [],
+        "Dienstag": [],
+        "Mittwoch": [],
+        "Donnerstag": [],
+        "Freitag": []
+    },
+    "blocked_customers": {
+        "Montag": [],
+        "Dienstag": [],
+        "Mittwoch": [],
+        "Donnerstag": [],
+        "Freitag": []
+    },
+    "bunkers": {
+        "bunker_sm": 20,
+        "bunker_hs": 40,
+        "bunker_ri": 70,
+        "bunker_kp": 60
+    },
+    "customer_db": [
+        {
+            "Kunde": "SIAT Urmatt",
+            "Umlaufzeit (hh:mm)": "03:55",
+            "1 - Sägemehl": true,
+            "2 - Hackschnitzel": true,
+            "3 - Rinde": false,
+            "4 - Kappholz": false
+        },
+        {
+            "Kunde": "JRS Ettenheim",
+            "Umlaufzeit (hh:mm)": "03:15",
+            "1 - Sägemehl": true,
+            "2 - Hackschnitzel": true,
+            "3 - Rinde": false,
+            "4 - Kappholz": false
+        },
+        {
+            "Kunde": "Trendel",
+            "Umlaufzeit (hh:mm)": "02:38",
+            "1 - Sägemehl": true,
+            "2 - Hackschnitzel": true,
+            "3 - Rinde": false,
+            "4 - Kappholz": false
+        },
+        {
+            "Kunde": "Rheinspan Germersheim",
+            "Umlaufzeit (hh:mm)": "04:03",
+            "1 - Sägemehl": true,
+            "2 - Hackschnitzel": true,
+            "3 - Rinde": false,
+            "4 - Kappholz": false
+        },
+        {
+            "Kunde": "Roquette Beinheim",
+            "Umlaufzeit (hh:mm)": "02:50",
+            "1 - Sägemehl": false,
+            "2 - Hackschnitzel": true,
+            "3 - Rinde": false,
+            "4 - Kappholz": false
+        },
+        {
+            "Kunde": "Baden-Airpark",
+            "Umlaufzeit (hh:mm)": "02:15",
+            "1 - Sägemehl": false,
+            "2 - Hackschnitzel": true,
+            "3 - Rinde": false,
+            "4 - Kappholz": false
+        },
+        {
+            "Kunde": "OCO H. Weber",
+            "Umlaufzeit (hh:mm)": "02:23",
+            "1 - Sägemehl": false,
+            "2 - Hackschnitzel": false,
+            "3 - Rinde": true,
+            "4 - Kappholz": false
+        },
+        {
+            "Kunde": "OCO Energy",
+            "Umlaufzeit (hh:mm)": "02:23",
+            "1 - Sägemehl": false,
+            "2 - Hackschnitzel": false,
+            "3 - Rinde": false,
+            "4 - Kappholz": true
+        },
+        {
+            "Kunde": "Zollikofer Auenheim",
+            "Umlaufzeit (hh:mm)": "01:50",
+            "1 - Sägemehl": false,
+            "2 - Hackschnitzel": true,
+            "3 - Rinde": true,
+            "4 - Kappholz": true
+        },
+        {
+            "Kunde": "Vogel Weitenung",
+            "Umlaufzeit (hh:mm)": "01:45",
+            "1 - Sägemehl": false,
+            "2 - Hackschnitzel": false,
+            "3 - Rinde": true,
+            "4 - Kappholz": true
+        },
+        {
+            "Kunde": "Treyer Bad Peterstal",
+            "Umlaufzeit (hh:mm)": "02:57",
+            "1 - Sägemehl": false,
+            "2 - Hackschnitzel": true,
+            "3 - Rinde": false,
+            "4 - Kappholz": false
+        }
+    ],
+    "ext_terminal_db": [
+        {
+            "Produkt / Artikel": "1 - Sägemehl",
+            "Kunde": "JRS Ettenheim",
+            "Frachtführer / Spedition": "Hügel",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": "",
+            "Bemerkung / Uhrzeit": NaN
+        },
+        {
+            "Produkt / Artikel": "1 - Sägemehl",
+            "Kunde": "Trendel",
+            "Frachtführer / Spedition": "Kiehl",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 3,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": NaN
+        },
+        {
+            "Produkt / Artikel": "1 - Sägemehl",
+            "Kunde": "Hohler",
+            "Frachtführer / Spedition": "Hohler",
+            "SOLL (Fuhren)": 1,
+            "IST (Erfüllt)": 1,
+            "Einsatztag": "Montag",
+            "Bemerkung / Uhrzeit": "7:00 Uhr"
+        },
+        {
+            "Produkt / Artikel": "1 - Sägemehl",
+            "Kunde": "ECB-Dotternhausen",
+            "Frachtführer / Spedition": "Banholzer",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "1 - Sägemehl",
+            "Kunde": "JRS Ettenheim",
+            "Frachtführer / Spedition": "Junginger",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "1 - Sägemehl",
+            "Kunde": "BestWoodKontor",
+            "Frachtführer / Spedition": "Rhenus / EVO",
+            "SOLL (Fuhren)": 3,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": "Dienstag",
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "1 - Sägemehl",
+            "Kunde": "BestWoodKontor",
+            "Frachtführer / Spedition": "Logispan / B.A.S.",
+            "SOLL (Fuhren)": 1,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": "Mittwoch",
+            "Bemerkung / Uhrzeit": "Nr: 354306"
+        },
+        {
+            "Produkt / Artikel": "1 - Sägemehl",
+            "Kunde": "BestWoodKontor",
+            "Frachtführer / Spedition": "HeizölHäberle EVO",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "1 - Sägemehl",
+            "Kunde": "BestWoodKontor",
+            "Frachtführer / Spedition": "Weisgerber / EVO",
+            "SOLL (Fuhren)": 1,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": "Mittwoch",
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "1 - Sägemehl",
+            "Kunde": "AnteBioPell",
+            "Frachtführer / Spedition": "Hellstern",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "1 - Sägemehl",
+            "Kunde": "BestWoodKontor",
+            "Frachtführer / Spedition": "LouEn / EVO",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "1 - Sägemehl",
+            "Kunde": "BestWoodKontor",
+            "Frachtführer / Spedition": "Groupe Francois Kiowatt",
+            "SOLL (Fuhren)": 3,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "1 - Sägemehl",
+            "Kunde": "Hurrle, Gaggenau",
+            "Frachtführer / Spedition": "Hurrle, Gaggenau",
+            "SOLL (Fuhren)": 1,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": "Freitag",
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "2 - Hackschnitzel",
+            "Kunde": "Trendel",
+            "Frachtführer / Spedition": "Kiehl",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "2 - Hackschnitzel",
+            "Kunde": "B.A.S. Wesel",
+            "Frachtführer / Spedition": "B.A.S. Wesel",
+            "SOLL (Fuhren)": 1,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": "Donnerstag",
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "2 - Hackschnitzel",
+            "Kunde": "Presto-Biomasse",
+            "Frachtführer / Spedition": "Presto-Biomasse",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "2 - Hackschnitzel",
+            "Kunde": "BestWoodKontor",
+            "Frachtführer / Spedition": "Kiehl / F-GV Bois",
+            "SOLL (Fuhren)": 6,
+            "IST (Erfüllt)": 1,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "2 - Hackschnitzel",
+            "Kunde": "BestWoodKontor",
+            "Frachtführer / Spedition": "Logispan / B.A.S.",
+            "SOLL (Fuhren)": 1,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": "Mittwoch",
+            "Bemerkung / Uhrzeit": "Best Nr: 351897"
+        },
+        {
+            "Produkt / Artikel": "2 - Hackschnitzel",
+            "Kunde": "ECB-Dotternhausen",
+            "Frachtführer / Spedition": "Banholzer",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "2 - Hackschnitzel",
+            "Kunde": "Bauer, Bad Rappenau",
+            "Frachtführer / Spedition": "Bauer, Bad Rappenau",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "2 - Hackschnitzel",
+            "Kunde": "BestWoodKontor",
+            "Frachtführer / Spedition": "Weisgerber / EVO",
+            "SOLL (Fuhren)": 1,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": "Donnerstag",
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "2 - Hackschnitzel",
+            "Kunde": "BestWoodKontor",
+            "Frachtführer / Spedition": "Rhenus / EVO",
+            "SOLL (Fuhren)": 1,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": "Montag",
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "2 - Hackschnitzel",
+            "Kunde": "BestWoodKontor",
+            "Frachtführer / Spedition": "JL Umwelt, Biblis",
+            "SOLL (Fuhren)": 1,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": "Dienstag",
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "3 - Rinde",
+            "Kunde": "ASB-Grünland",
+            "Frachtführer / Spedition": "Kiehl",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "3 - Rinde",
+            "Kunde": "BestWoodKontor",
+            "Frachtführer / Spedition": "Junginger",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "3 - Rinde",
+            "Kunde": "BestWoodKontor",
+            "Frachtführer / Spedition": "Logispan / B.A.S.",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": "LS: RN297647"
+        },
+        {
+            "Produkt / Artikel": "3 - Rinde",
+            "Kunde": "Brüning",
+            "Frachtführer / Spedition": "Pleinies",
+            "SOLL (Fuhren)": 1,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": "Freitag",
+            "Bemerkung / Uhrzeit": "AB-NR.: 1300075-1"
+        },
+        {
+            "Produkt / Artikel": "3 - Rinde",
+            "Kunde": "B.A.S. Wesel",
+            "Frachtführer / Spedition": "B.A.S. Wesel",
+            "SOLL (Fuhren)": 1,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": "Mittwoch",
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "3 - Rinde",
+            "Kunde": "Händle",
+            "Frachtführer / Spedition": "Händle",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        },
+        {
+            "Produkt / Artikel": "4 - Kappholz",
+            "Kunde": "Zollikofer, Auenheim",
+            "Frachtführer / Spedition": "Junginger",
+            "SOLL (Fuhren)": 3,
+            "IST (Erfüllt)": 1,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": "1x Container"
+        },
+        {
+            "Produkt / Artikel": "4 - Kappholz",
+            "Kunde": "Trendel",
+            "Frachtführer / Spedition": "Junginger",
+            "SOLL (Fuhren)": 0,
+            "IST (Erfüllt)": 0,
+            "Einsatztag": NaN,
+            "Bemerkung / Uhrzeit": ""
+        }
+    ],
+    "quotas_state": {
+        "Rheinspan Germersheim|||2 - Hackschnitzel": {
+            "soll": 0,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "Rheinspan Germersheim|||1 - Sägemehl": {
+            "soll": 2,
+            "rest": "nur 6:00-15:30  letzte Einwiegung",
+            "prio": 3
+        },
+        "JRS Ettenheim|||1 - Sägemehl": {
+            "soll": 4,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "Baden-Airpark|||3 - Rinde": {
+            "soll": 0,
+            "rest": "nan",
+            "prio": 3
+        },
+        "SIAT Urmatt|||1 - Sägemehl": {
+            "soll": 2,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "Trendel|||1 - Sägemehl": {
+            "soll": 3,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "Roquette Beinheim|||1 - Sägemehl": {
+            "soll": 0,
+            "rest": "nan",
+            "prio": 3
+        },
+        "OCO H. Weber|||1 - Sägemehl": {
+            "soll": 0,
+            "rest": "nan",
+            "prio": 3
+        },
+        "OCO Energy|||1 - Sägemehl": {
+            "soll": 0,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "Zollikofer Auenheim|||1 - Sägemehl": {
+            "soll": 0,
+            "rest": "nan",
+            "prio": 3
+        },
+        "Treyer Bad Peterstal|||1 - Sägemehl": {
+            "soll": 0,
+            "rest": "nan",
+            "prio": 3
+        },
+        "SIAT Urmatt|||2 - Hackschnitzel": {
+            "soll": 0,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "Trendel|||2 - Hackschnitzel": {
+            "soll": 1,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "Roquette Beinheim|||2 - Hackschnitzel": {
+            "soll": 3,
+            "rest": "Best Nr. 4501048441",
+            "prio": 3
+        },
+        "OCO H. Weber|||2 - Hackschnitzel": {
+            "soll": 0,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "OCO Energy|||2 - Hackschnitzel": {
+            "soll": 0,
+            "rest": "nan",
+            "prio": 3
+        },
+        "Zollikofer Auenheim|||2 - Hackschnitzel": {
+            "soll": 0,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "Treyer Bad Peterstal|||2 - Hackschnitzel": {
+            "soll": 0,
+            "rest": "erst nach Absprache!",
+            "prio": 3
+        },
+        "Vogel Weitenung|||3 - Rinde": {
+            "soll": 0,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "Vogel Weitenung|||4 - Kappholz": {
+            "soll": 0,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "OCO H. Weber|||3 - Rinde": {
+            "soll": 0,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "OCO H. Weber|||4 - Kappholz": {
+            "soll": 0,
+            "rest": "nan",
+            "prio": 3
+        },
+        "JRS Ettenheim|||2 - Hackschnitzel": {
+            "soll": 8,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "Baden-Airpark|||2 - Hackschnitzel": {
+            "soll": 5,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "OCO Energy|||4 - Kappholz": {
+            "soll": 0,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "Zollikofer Auenheim|||3 - Rinde": {
+            "soll": 0,
+            "rest": "Keine",
+            "prio": 3
+        },
+        "Zollikofer Auenheim|||4 - Kappholz": {
+            "soll": 0,
+            "rest": "Keine",
+            "prio": 3
+        }
+    },
+    "booked_trips": [
+        {
+            "id": "manual_Montag_RA KH 14_Rheinspan Germersheim_1 - Sägemehl_0",
+            "Tag": "Montag",
+            "Fahrzeug": "RA KH 14",
+            "Zeitfenster": "Manuell eingeplant",
+            "Kunde": "Rheinspan Germersheim",
+            "Produkt": "1 - Sägemehl",
+            "Menge_m3": 103,
+            "dauer_h": 4.05,
+            "is_manual": true
+        },
+        {
+            "id": "Montag_RA KH 92_JRS Ettenheim_2 - Hackschnitzel_0",
+            "Tag": "Montag",
+            "Fahrzeug": "RA KH 92",
+            "Zeitfenster": "06:00 - 09:15",
+            "Kunde": "JRS Ettenheim",
+            "Produkt": "2 - Hackschnitzel",
+            "Menge_m3": 103,
+            "dauer_h": 3.25,
+            "is_manual": false
+        },
+        {
+            "id": "manual_Montag_RA KH 92_JRS Ettenheim_2 - Hackschnitzel_2",
+            "Tag": "Montag",
+            "Fahrzeug": "RA KH 92",
+            "Zeitfenster": "Manuell eingeplant",
+            "Kunde": "JRS Ettenheim",
+            "Produkt": "2 - Hackschnitzel",
+            "Menge_m3": 103,
+            "dauer_h": 3.25,
+            "is_manual": true
+        },
+        {
+            "id": "manual_Montag_RA KH 92_Roquette Beinheim_2 - Hackschnitzel_3",
+            "Tag": "Montag",
+            "Fahrzeug": "RA KH 92",
+            "Zeitfenster": "Manuell eingeplant",
+            "Kunde": "Roquette Beinheim",
+            "Produkt": "2 - Hackschnitzel",
+            "Menge_m3": 103,
+            "dauer_h": 2.83,
+            "is_manual": true
+        },
+        {
+            "id": "manual_Dienstag_RA KH 92_JRS Ettenheim_1 - Sägemehl_4",
+            "Tag": "Dienstag",
+            "Fahrzeug": "RA KH 92",
+            "Zeitfenster": "Manuell eingeplant",
+            "Kunde": "JRS Ettenheim",
+            "Produkt": "1 - Sägemehl",
+            "Menge_m3": 103,
+            "dauer_h": 3.25,
+            "is_manual": true
+        },
+        {
+            "id": "Dienstag_RA KH 24_Baden-Airpark_2 - Hackschnitzel_2",
+            "Tag": "Dienstag",
+            "Fahrzeug": "RA KH 24",
+            "Zeitfenster": "12:30 - 14:45",
+            "Kunde": "Baden-Airpark",
+            "Produkt": "2 - Hackschnitzel",
+            "Menge_m3": 103,
+            "dauer_h": 2.25,
+            "is_manual": false
+        },
+        {
+            "id": "manual_Dienstag_RA KH 92_JRS Ettenheim_1 - Sägemehl_6",
+            "Tag": "Dienstag",
+            "Fahrzeug": "RA KH 92",
+            "Zeitfenster": "Manuell eingeplant",
+            "Kunde": "JRS Ettenheim",
+            "Produkt": "1 - Sägemehl",
+            "Menge_m3": 103,
+            "dauer_h": 3.25,
+            "is_manual": true
+        },
+        {
+            "id": "manual_Dienstag_RA KH 24_JRS Ettenheim_1 - Sägemehl_7",
+            "Tag": "Dienstag",
+            "Fahrzeug": "RA KH 24",
+            "Zeitfenster": "Manuell eingeplant",
+            "Kunde": "JRS Ettenheim",
+            "Produkt": "1 - Sägemehl",
+            "Menge_m3": 103,
+            "dauer_h": 3.25,
+            "is_manual": true
+        },
+        {
+            "id": "Mittwoch_RA KH 24_Baden-Airpark_2 - Hackschnitzel_2",
+            "Tag": "Mittwoch",
+            "Fahrzeug": "RA KH 24",
+            "Zeitfenster": "12:30 - 14:45",
+            "Kunde": "Baden-Airpark",
+            "Produkt": "2 - Hackschnitzel",
+            "Menge_m3": 103,
+            "dauer_h": 2.25,
+            "is_manual": false
+        },
+        {
+            "id": "manual_Mittwoch_RA KH 92_JRS Ettenheim_1 - Sägemehl_9",
+            "Tag": "Mittwoch",
+            "Fahrzeug": "RA KH 92",
+            "Zeitfenster": "Manuell eingeplant",
+            "Kunde": "JRS Ettenheim",
+            "Produkt": "1 - Sägemehl",
+            "Menge_m3": 103,
+            "dauer_h": 3.25,
+            "is_manual": true
+        },
+        {
+            "id": "manual_Mittwoch_RA KH 24_Baden-Airpark_2 - Hackschnitzel_10",
+            "Tag": "Mittwoch",
+            "Fahrzeug": "RA KH 24",
+            "Zeitfenster": "Manuell eingeplant",
+            "Kunde": "Baden-Airpark",
+            "Produkt": "2 - Hackschnitzel",
+            "Menge_m3": 103,
+            "dauer_h": 2.25,
+            "is_manual": true
+        },
+        {
+            "id": "manual_Mittwoch_RA KH 24_Baden-Airpark_2 - Hackschnitzel_11",
+            "Tag": "Mittwoch",
+            "Fahrzeug": "RA KH 24",
+            "Zeitfenster": "Manuell eingeplant",
+            "Kunde": "Baden-Airpark",
+            "Produkt": "2 - Hackschnitzel",
+            "Menge_m3": 103,
+            "dauer_h": 2.25,
+            "is_manual": true
+        },
+        {
+            "id": "manual_Mittwoch_RA KH 92_Treyer Bad Peterstal_2 - Hackschnitzel_12",
+            "Tag": "Mittwoch",
+            "Fahrzeug": "RA KH 92",
+            "Zeitfenster": "Manuell eingeplant",
+            "Kunde": "Treyer Bad Peterstal",
+            "Produkt": "2 - Hackschnitzel",
+            "Menge_m3": 103,
+            "dauer_h": 2.95,
+            "is_manual": true
+        },
+        {
+            "id": "manual_Mittwoch_RA KH 24_JRS Ettenheim_1 - Sägemehl_13",
+            "Tag": "Mittwoch",
+            "Fahrzeug": "RA KH 24",
+            "Zeitfenster": "Manuell eingeplant",
+            "Kunde": "JRS Ettenheim",
+            "Produkt": "1 - Sägemehl",
+            "Menge_m3": 103,
+            "dauer_h": 3.25,
+            "is_manual": true
+        }
+    ],
+    "ext_booked_trips": [
+        {
+            "Zeitpunkt": "28.07.2026 15:12",
+            "Produkt": "1 - Sägemehl",
+            "Kunde": "Hohler",
+            "Spedition": "Hohler",
+            "Einsatztag": "Montag",
+            "Bemerkung": "7:00 Uhr"
+        },
+        {
+            "Zeitpunkt": "28.07.2026 15:13",
+            "Produkt": "1 - Sägemehl",
+            "Kunde": "Trendel",
+            "Spedition": "Kiehl",
+            "Einsatztag": NaN,
+            "Bemerkung": NaN
+        },
+        {
+            "Zeitpunkt": "28.07.2026 15:13",
+            "Produkt": "2 - Hackschnitzel",
+            "Kunde": "BestWoodKontor",
+            "Spedition": "Kiehl / F-GV Bois",
+            "Einsatztag": "Keiner",
+            "Bemerkung": ""
+        },
+        {
+            "Zeitpunkt": "28.07.2026 15:16",
+            "Produkt": "1 - Sägemehl",
+            "Kunde": "Trendel",
+            "Spedition": "Kiehl",
+            "Einsatztag": NaN,
+            "Bemerkung": NaN
+        },
+        {
+            "Zeitpunkt": "29.07.2026 14:38",
+            "Produkt": "4 - Kappholz",
+            "Kunde": "Zollikofer, Auenheim",
+            "Spedition": "Junginger",
+            "Einsatztag": NaN,
+            "Bemerkung": "1x Container"
+        },
+        {
+            "Zeitpunkt": "29.07.2026 14:38",
+            "Produkt": "1 - Sägemehl",
+            "Kunde": "Trendel",
+            "Spedition": "Kiehl",
+            "Einsatztag": NaN,
+            "Bemerkung": NaN
+        }
+    ]
+}

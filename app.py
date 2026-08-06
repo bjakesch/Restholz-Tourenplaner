@@ -9,6 +9,11 @@ from datetime import datetime
 # ==========================================
 st.set_page_config(page_title="Restholz-Tourenplaner Sägewerk", layout="wide", page_icon="🪵")
 
+import streamlit as st
+from streamlit_autorefresh import st_autorefresh
+
+st_autorefresh(interval=2000, key="auto_reload")
+
 # ==========================================
 # CUSTOM CSS (FARBANPASSUNG AUSHILFSFAHRER)
 # ==========================================

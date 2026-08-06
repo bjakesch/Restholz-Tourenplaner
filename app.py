@@ -89,6 +89,14 @@ def parse_time_str(t_str):
     except Exception:
         return 2.0
 
+def format_hours(hours_float):
+    hrs = int(hours_float)
+    mins = int(round((hours_float - hrs) * 60))
+    if mins == 60:
+        hrs += 1
+        mins = 0
+    return f"{hrs:02d}:{mins:02d}"
+
 # ==========================================
 # ECHTER STATE-SYNC BEI JEDEM RERUN
 # ==========================================
@@ -526,3 +534,212 @@ with st.expander("5. 🛠️ Manuelle Verbuchung (Eigenfuhrpark)", expanded=Fals
         st.rerun()
 
 st.divider()
+
+# ==========================================
+# BEREICH 6: AUTOMATISCHE PLANUNGS-ENGINE
+# ==========================================
+bunker_levels = {
+    "1 - Sägemehl": st.session_state.bunker_sm,
+    "2 - Hackschnitzel": st.session_state.bunker_hs,
+    "3 - Rinde": st.session_state.bunker_ri,
+    "4 - Kappholz": st.session_state.bunker_kp,
+}
+
+# Quoten-Soll & -Ist abgleichen
+remaining_quotas = {}
+for k, v in st.session_state.quotas_state.items():
+    cust_name, prod_name = k
+    already_booked = sum(1 for b in st.session_state.booked_trips if b.get("Kunde") == cust_name and b.get("Produkt") == prod_name)
+    soll = v.get("soll", 0)
+    remaining_quotas[k] = max(0, soll - already_booked)
+
+schedule_by_day = {day: {t: [] for t in TRUCK_PRIO} for day in WEEKDAYS}
+truck_used_hours = {day: {t: 0.0 for t in TRUCK_PRIO} for day in WEEKDAYS}
+
+# Manuell gebuchte Touren im Fahrplan verankern
+for b in st.session_state.booked_trips:
+    b_day = b.get("Tag")
+    b_truck = b.get("Fahrzeug")
+    if b_day in WEEKDAYS and b_truck in TRUCK_PRIO:
+        schedule_by_day[b_day][b_truck].append(b)
+        truck_used_hours[b_day][b_truck] += b.get("dauer_h", 2.0)
+
+# Automatische Verteilung für offene Kontingente
+for day in WEEKDAYS:
+    active_trucks = [t for t in TRUCK_PRIO if t not in blocked_trucks.get(day, [])]
+    extra_d_list = extra_drivers.get(day, [])
+    
+    # Verfügbare Restzeit pro LKW berechnen
+    truck_max_hours = {}
+    for t in active_trucks:
+        max_h = shift_hours + (4.0 if t in extra_d_list else 0.0)
+        truck_max_hours[t] = max_h
+
+    # Offene Aufträge nach Dringlichkeit sortieren (Bunker-Status + Priorität)
+    candidates = []
+    for (c_name, p_name), rem_qty in remaining_quotas.items():
+        if rem_qty <= 0:
+            continue
+        if c_name in blocked_customers_by_day.get(day, set()):
+            continue
+        if bunker_levels.get(p_name, 50) <= 10:
+            continue
+            
+        dur = cust_duration_map.get(c_name, 2.0)
+        q_info = st.session_state.quotas_state.get((c_name, p_name), {})
+        prio = q_info.get("prio", 3)
+        b_level = bunker_levels.get(p_name, 50)
+        
+        # Prio-Score berechnen
+        score = prio * 10
+        if b_level >= 80: score += 30
+        elif b_level >= 60: score += 15
+        
+        candidates.append({
+            "Kunde": c_name,
+            "Produkt": p_name,
+            "dauer_h": dur,
+            "score": score,
+            "rest_req": q_info.get("rest", "Keine")
+        })
+        
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+
+    # Touren auf LKWs verteilen
+    for cand in candidates:
+        c_key = (cand["Kunde"], cand["Produkt"])
+        while remaining_quotas[c_key] > 0:
+            assigned = False
+            for t in active_trucks:
+                current_h = truck_used_hours[day][t]
+                max_h = truck_max_hours[t]
+                if current_h + cand["dauer_h"] <= max_h + 0.1: # 6 Min Toleranz
+                    start_t = 6.0 + current_h
+                    end_t = start_t + cand["dauer_h"]
+                    
+                    time_slot_str = f"{format_hours(start_t)} - {format_hours(end_t)} Uhr"
+                    
+                    schedule_by_day[day][t].append({
+                        "id": f"auto_{day}_{t}_{len(schedule_by_day[day][t])}",
+                        "Tag": day,
+                        "Fahrzeug": t,
+                        "Zeitfenster": time_slot_str,
+                        "Kunde": cand["Kunde"],
+                        "Produkt": cand["Produkt"],
+                        "Menge_m3": truck_cap,
+                        "dauer_h": cand["dauer_h"],
+                        "is_manual": False,
+                        "Bemerkung": cand["rest_req"]
+                    })
+                    
+                    truck_used_hours[day][t] += cand["dauer_h"]
+                    remaining_quotas[c_key] -= 1
+                    assigned = True
+                    break
+            if not assigned:
+                break # Wenn an diesem Tag kein LKW mehr frei ist, abbrechen und nächsten Tag probieren
+
+# ==========================================
+# BEREICH 7: WOCHENPLAN-VISUALISIERUNG
+# ==========================================
+st.header("📅 Wochen- & Tages-Fahrpläne")
+
+tab_tag, tab_woche = st.tabs(["📌 Tagesansicht (Detail)", "🗓️ Wochenübersicht (Gesamter Fuhrpark)"])
+
+with tab_tag:
+    st.subheader(f"Detailplan für {selected_day}")
+    
+    cols_truck = st.columns(len(TRUCK_PRIO))
+    for idx, t in enumerate(TRUCK_PRIO):
+        with cols_truck[idx]:
+            is_blocked = t in blocked_trucks.get(selected_day, [])
+            is_extra = t in extra_drivers.get(selected_day, [])
+            
+            if is_blocked:
+                st.error(f"🚛 **{t}**\n\n❌ **FAHRZEUGAUSFALL**")
+            else:
+                extra_badge = " 🟢 (Aushilfe)" if is_extra else ""
+                used_h = truck_used_hours[selected_day][t]
+                max_h = shift_hours + (4.0 if is_extra else 0.0)
+                
+                st.success(f"🚛 **{t}**{extra_badge}\n\n⏱️ **{format_hours(used_h)} / {format_hours(max_h)} Std.**")
+                
+                trips = schedule_by_day[selected_day][t]
+                if not trips:
+                    st.info("Keine Touren eingeplant.")
+                else:
+                    for trip in trips:
+                        is_man = trip.get("is_manual", False)
+                        badge = "🛠️ [Manuell]" if is_man else "🤖 [Auto]"
+                        
+                        st.markdown(f"""
+                        <div style="border:1px solid #ddd; padding:8px; border-radius:5px; margin-bottom:8px; background-color:#f9f9f9;">
+                            <small>{badge} {trip.get('Zeitfenster', '')}</small><br>
+                            <strong>{trip['Kunde']}</strong><br>
+                            <span style="color:#666;">📦 {trip['Produkt']} ({trip['Menge_m3']} m³)</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+with tab_woche:
+    st.subheader("Wochenübersicht Auslastung & Tourenanzahl")
+    
+    wochen_summary = []
+    for day in WEEKDAYS:
+        row_data = {"Tag": day}
+        total_day_trips = 0
+        total_day_hours = 0.0
+        
+        for t in TRUCK_PRIO:
+            t_trips = schedule_by_day[day][t]
+            t_hours = truck_used_hours[day][t]
+            row_data[f"{t} (Fuhren)"] = len(t_trips)
+            row_data[f"{t} (Std.)"] = f"{format_hours(t_hours)}"
+            total_day_trips += len(t_trips)
+            total_day_hours += t_hours
+            
+        row_data["Gesamt Fuhren"] = total_day_trips
+        row_data["Gesamt Stunden"] = f"{format_hours(total_day_hours)}"
+        wochen_summary.append(row_data)
+        
+    df_woche = pd.DataFrame(wochen_summary)
+    st.dataframe(df_woche, use_container_width=True, hide_index=True)
+
+# ==========================================
+# BEREICH 8: HISTORIE & GEBUCHTE TOUREN
+# ==========================================
+with st.expander("📝 Verbuchte Touren verwalten & Stornieren", expanded=False):
+    st.caption("Hier siehst du alle bereits fest verbuchten Touren des Eigenfuhrparks.")
+    if st.session_state.booked_trips:
+        df_booked = pd.DataFrame(st.session_state.booked_trips)
+        cols_to_show = [c for c in ["id", "Tag", "Fahrzeug", "Kunde", "Produkt", "Menge_m3", "dauer_h", "Zeitfenster"] if c in df_booked.columns]
+        st.dataframe(df_booked[cols_to_show], use_container_width=True, hide_index=True)
+        
+        del_col1, del_col2 = st.columns([3, 1])
+        trip_to_del_id = del_col1.selectbox("Tour zum Stornieren auswählen:", options=[b["id"] for b in st.session_state.booked_trips], key="del_trip_select")
+        if del_col2.button("❌ Tour Stornieren / Löschen", use_container_width=True):
+            st.session_state.booked_trips = [b for b in st.session_state.booked_trips if b["id"] != trip_to_del_id]
+            save_persistent_data()
+            st.success("Tour entfernt!")
+            st.rerun()
+    else:
+        st.info("Bisher wurden keine Touren manuell fest verbucht.")
+
+# ==========================================
+# BEREICH 9: KPI & AUSWERTUNG
+# ==========================================
+st.divider()
+st.subheader("📊 Wochen-Kennzahlen & Auswertung")
+
+kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+
+total_eigen_trips = sum(len(schedule_by_day[d][t]) for d in WEEKDAYS for t in TRUCK_PRIO)
+total_volume_m3 = total_eigen_trips * truck_cap
+total_ext_trips = sum(r.get("IST (Erfüllt)", 0) for _, r in st.session_state.ext_terminal_db.iterrows()) if not st.session_state.ext_terminal_db.empty else 0
+
+kpi1.metric("Transportiertes Volumen (Eigenfuhrpark)", f"{total_volume_m3:,} m³".replace(",", "."))
+kpi2.metric("Geplante Eigen-Fuhren", f"{total_eigen_trips} Fuhren")
+kpi3.metric("Erfüllte Fremdfuhren", f"{total_ext_trips} Fuhren")
+
+soll_total = sum(v.get("soll", 0) for v in st.session_state.quotas_state.values())
+fulfillment = round((total_eigen_trips / soll_total * 100), 1) if soll_total > 0 else 100.0
+kpi4.metric("Soll-Erfüllungsgrad Fuhrpark", f"{fulfillment}%")

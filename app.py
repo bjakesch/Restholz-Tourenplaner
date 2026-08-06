@@ -10,7 +10,7 @@ from streamlit_autorefresh import st_autorefresh
 # ==========================================
 st.set_page_config(page_title="Restholz-Tourenplaner Sägewerk", layout="wide", page_icon="🪵")
 
-# 1. AUTO-REFRESH AKTIVIEREN (alle 2 Sekunden)
+# Auto-Refresh alle 2000 ms (2 Sekunden)
 st_autorefresh(interval=2000, key="auto_reload")
 
 # ==========================================
@@ -37,7 +37,7 @@ LOGO_PATH = os.path.join(BASE_DIR, "KELLERHOLZ-CMYK.png")
 STATE_FILE = os.path.join(BASE_DIR, "app_state.json")
 
 # ==========================================
-# CONSTANTS
+# KONSTANTEN
 # ==========================================
 PRODUCT_LIST = ["1 - Sägemehl", "2 - Hackschnitzel", "3 - Rinde", "4 - Kappholz"]
 WEEKDAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"]
@@ -46,7 +46,7 @@ TRUCK_PRIO = ["RA KH 14", "RA KH 92", "RA KH 24"]
 EXT_COL_ORDER = ["Produkt / Artikel", "Kunde", "Frachtführer / Spedition", "SOLL (Fuhren)", "IST (Erfüllt)", "Einsatztag", "Bemerkung / Uhrzeit"]
 
 # ==========================================
-# PERSISTENZ (SPEICHERN & LADEN)
+# PERSISTENZ-FUNKTIONEN
 # ==========================================
 def load_persistent_data():
     if os.path.exists(STATE_FILE):
@@ -80,12 +80,6 @@ def save_persistent_data():
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-# ✅ BEI JEDEM REFRESH DIE DATEN NEU EINLESEN UND DEM SESSION STATE ÜBERGEBEN
-saved_data = load_persistent_data()
-
-st.session_state.booked_trips = saved_data.get("booked_trips", [])
-st.session_state.ext_booked_trips = saved_data.get("ext_booked_trips", [])
-
 def parse_time_str(t_str):
     try:
         parts = str(t_str).strip().split(":")
@@ -95,11 +89,42 @@ def parse_time_str(t_str):
     except Exception:
         return 2.0
 
-# Stammdaten bei jedem Durchlauf synchronisieren
+# ==========================================
+# ECHTER STATE-SYNC BEI JEDEM RERUN
+# ==========================================
+saved_data = load_persistent_data()
+
+# Basic Settings
+st.session_state["shift_hours"] = float(saved_data.get("shift_hours", 9.0))
+st.session_state["truck_cap"] = int(saved_data.get("truck_cap", 103))
+st.session_state["selected_day"] = saved_data.get("selected_day", "Montag")
+
+# Touren & Fremdfuhren
+st.session_state["booked_trips"] = saved_data.get("booked_trips", [])
+st.session_state["ext_booked_trips"] = saved_data.get("ext_booked_trips", [])
+
+# Bunker-Füllstände
+b_saved = saved_data.get("bunkers", {})
+st.session_state["bunker_sm"] = b_saved.get("bunker_sm", 50)
+st.session_state["bunker_hs"] = b_saved.get("bunker_hs", 50)
+st.session_state["bunker_ri"] = b_saved.get("bunker_ri", 50)
+st.session_state["bunker_kp"] = b_saved.get("bunker_kp", 50)
+
+# Ausfälle, Aushilfen & Kundensperren
+saved_blocked_trucks = saved_data.get("blocked_trucks", {})
+saved_extra_drivers = saved_data.get("extra_drivers", {})
+saved_blocked_custs = saved_data.get("blocked_customers", {})
+
+for day in WEEKDAYS:
+    st.session_state[f"block_truck_{day}"] = saved_blocked_trucks.get(day, [])
+    st.session_state[f"extra_driver_{day}"] = saved_extra_drivers.get(day, [])
+    st.session_state[f"block_cust_{day}"] = saved_blocked_custs.get(day, [])
+
+# Stammdaten
 if "customer_db" in saved_data and saved_data["customer_db"]:
-    st.session_state.customer_db = pd.DataFrame(saved_data["customer_db"])
+    st.session_state["customer_db"] = pd.DataFrame(saved_data["customer_db"])
 elif "customer_db" not in st.session_state:
-    st.session_state.customer_db = pd.DataFrame([
+    st.session_state["customer_db"] = pd.DataFrame([
         {"Kunde": "SIAT Urmatt", "Umlaufzeit (hh:mm)": "03:55", "1 - Sägemehl": True, "2 - Hackschnitzel": True, "3 - Rinde": False, "4 - Kappholz": False},
         {"Kunde": "JRS Ettenheim", "Umlaufzeit (hh:mm)": "03:15", "1 - Sägemehl": True, "2 - Hackschnitzel": False, "3 - Rinde": False, "4 - Kappholz": False},
         {"Kunde": "Trendel", "Umlaufzeit (hh:mm)": "02:38", "1 - Sägemehl": True, "2 - Hackschnitzel": True, "3 - Rinde": False, "4 - Kappholz": False},
@@ -113,21 +138,21 @@ elif "customer_db" not in st.session_state:
         {"Kunde": "Treyer Bad Peterstal", "Umlaufzeit (hh:mm)": "02:57", "1 - Sägemehl": True, "2 - Hackschnitzel": True, "3 - Rinde": False, "4 - Kappholz": False},
     ])
 
-# Fremdspeditionen bei jedem Durchlauf synchronisieren
+# Fremdspeditionen
 if "ext_terminal_db" in saved_data and saved_data["ext_terminal_db"]:
     df_ext = pd.DataFrame(saved_data["ext_terminal_db"])
-    st.session_state.ext_terminal_db = df_ext.reindex(columns=[c for c in EXT_COL_ORDER if c in df_ext.columns])
+    st.session_state["ext_terminal_db"] = df_ext.reindex(columns=[c for c in EXT_COL_ORDER if c in df_ext.columns])
 elif "ext_terminal_db" not in st.session_state:
-    st.session_state.ext_terminal_db = pd.DataFrame([
+    st.session_state["ext_terminal_db"] = pd.DataFrame([
         {"Produkt / Artikel": "1 - Sägemehl", "Kunde": "SIAT Urmatt", "Frachtführer / Spedition": "Spedition Müller", "SOLL (Fuhren)": 0, "IST (Erfüllt)": 0, "Einsatztag": "", "Bemerkung / Uhrzeit": "Avisierung vorab"},
         {"Produkt / Artikel": "2 - Hackschnitzel", "Kunde": "Rheinspan Germersheim", "Frachtführer / Spedition": "TransHolz GmbH", "SOLL (Fuhren)": 0, "IST (Erfüllt)": 0, "Einsatztag": "Dienstag", "Bemerkung / Uhrzeit": "08:00 Uhr Zeitfenster"}
     ], columns=EXT_COL_ORDER)
 
-# Kontingente bei jedem Durchlauf synchronisieren
+# Kontingente
 if "quotas_state" in saved_data and saved_data["quotas_state"]:
-    st.session_state.quotas_state = {tuple(k.split("|||")): v for k, v in saved_data["quotas_state"].items()}
+    st.session_state["quotas_state"] = {tuple(k.split("|||")): v for k, v in saved_data["quotas_state"].items()}
 elif "quotas_state" not in st.session_state:
-    st.session_state.quotas_state = {
+    st.session_state["quotas_state"] = {
         ("Rheinspan Germersheim", "2 - Hackschnitzel"): {"soll": 0, "rest": "Zwingend Dienstag 07:00 Uhr", "prio": 4},
         ("Rheinspan Germersheim", "1 - Sägemehl"): {"soll": 0, "rest": "Keine", "prio": 4},
         ("JRS Ettenheim", "1 - Sägemehl"): {"soll": 0, "rest": "Keine", "prio": 3},
@@ -136,7 +161,7 @@ elif "quotas_state" not in st.session_state:
     }
 
 # ==========================================
-# RESET-LOGIK (ALS CALLBACK)
+# RESET-LOGIK (CALLBACK)
 # ==========================================
 def perform_global_reset():
     clean_quotas = {}
@@ -207,17 +232,30 @@ with col_logo:
 # ==========================================
 st.sidebar.header("⚙️ Fahrzeuge & Schichtzeit")
 
-shift_hours = st.sidebar.number_input("Max. Schichtzeit (Std./Tag)", value=float(saved_data.get("shift_hours", 9.0)), step=0.5, key="shift_hours", on_change=save_persistent_data)
-truck_cap = st.sidebar.number_input("Kapazität Sattelzug (m³)", value=int(saved_data.get("truck_cap", 103)), step=1, key="truck_cap", on_change=save_persistent_data)
+shift_hours = st.sidebar.number_input(
+    "Max. Schichtzeit (Std./Tag)", 
+    step=0.5, 
+    key="shift_hours", 
+    on_change=save_persistent_data
+)
 
-selected_day = st.sidebar.select_slider("Aktueller Planungstag / Ansicht", options=WEEKDAYS, value=saved_data.get("selected_day", "Montag"), key="selected_day", on_change=save_persistent_data)
+truck_cap = st.sidebar.number_input(
+    "Kapazität Sattelzug (m³)", 
+    step=1, 
+    key="truck_cap", 
+    on_change=save_persistent_data
+)
+
+selected_day = st.sidebar.select_slider(
+    "Aktueller Planungstag / Ansicht", 
+    options=WEEKDAYS, 
+    key="selected_day", 
+    on_change=save_persistent_data
+)
 selected_day_idx = WEEKDAYS.index(selected_day)
 
 st.sidebar.divider()
 st.sidebar.subheader("🚛 Fahrzeugverfügbarkeit")
-
-saved_blocked_trucks = saved_data.get("blocked_trucks", {})
-saved_extra_drivers = saved_data.get("extra_drivers", {})
 
 blocked_trucks = {}
 extra_drivers = {}
@@ -227,22 +265,19 @@ for day in WEEKDAYS:
     blocked_trucks[day] = st.sidebar.multiselect(
         f"❌ Ausfall am {day}:",
         options=TRUCK_PRIO,
-        default=saved_blocked_trucks.get(day, []),
         key=f"block_truck_{day}",
         on_change=save_persistent_data
     )
     
-    avail_for_extra = [t for t in TRUCK_PRIO if t not in blocked_trucks[day]]
+    avail_for_extra = [t for t in TRUCK_PRIO if t not in st.session_state.get(f"block_truck_{day}", [])]
     extra_drivers[day] = st.sidebar.multiselect(
         f"🟢 Aushilfsfahrer (17–21 Uhr) am {day}:",
         options=avail_for_extra,
-        default=[t for t in saved_extra_drivers.get(day, []) if t in avail_for_extra],
         key=f"extra_driver_{day}",
         on_change=save_persistent_data
     )
 
 st.sidebar.divider()
-
 st.sidebar.button("💥 Alles zurücksetzen (Reset)", use_container_width=True, type="secondary", on_click=perform_global_reset)
 
 col_title, col_btn = st.columns([3, 1])
@@ -257,43 +292,35 @@ with col_btn:
 with st.expander("1. 🏭 Aktuelle Bunker-Füllstände (%)", expanded=True):
     st.caption("Füllstände fließen direkt in die Dispo-Punktevergabe ein.")
     pct_options = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-    saved_bunkers = saved_data.get("bunkers", {})
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        bunker_sm = st.select_slider("1 - Sägemehl", options=pct_options, value=saved_bunkers.get("bunker_sm", 50), key="bunker_sm", on_change=save_persistent_data)
+        bunker_sm = st.select_slider("1 - Sägemehl", options=pct_options, key="bunker_sm", on_change=save_persistent_data)
         st.progress(bunker_sm / 100)
         if bunker_sm <= 10: st.warning("⛔ GESPERRT")
         elif bunker_sm >= 80: st.error("🚨 HOCH")
         else: st.success("✅ Normal")
         
     with col2:
-        bunker_hs = st.select_slider("2 - Hackschnitzel", options=pct_options, value=saved_bunkers.get("bunker_hs", 50), key="bunker_hs", on_change=save_persistent_data)
+        bunker_hs = st.select_slider("2 - Hackschnitzel", options=pct_options, key="bunker_hs", on_change=save_persistent_data)
         st.progress(bunker_hs / 100)
         if bunker_hs <= 10: st.warning("⛔ GESPERRT")
         elif bunker_hs >= 80: st.error("🚨 HOCH")
         else: st.success("✅ Normal")
         
     with col3:
-        bunker_ri = st.select_slider("3 - Rinde", options=pct_options, value=saved_bunkers.get("bunker_ri", 50), key="bunker_ri", on_change=save_persistent_data)
+        bunker_ri = st.select_slider("3 - Rinde", options=pct_options, key="bunker_ri", on_change=save_persistent_data)
         st.progress(bunker_ri / 100)
         if bunker_ri <= 10: st.warning("⛔ GESPERRT")
         elif bunker_ri >= 80: st.error("🚨 HOCH")
         else: st.success("✅ Normal")
         
     with col4:
-        bunker_kp = st.select_slider("4 - Kappholz", options=pct_options, value=saved_bunkers.get("bunker_kp", 50), key="bunker_kp", on_change=save_persistent_data)
+        bunker_kp = st.select_slider("4 - Kappholz", options=pct_options, key="bunker_kp", on_change=save_persistent_data)
         st.progress(bunker_kp / 100)
         if bunker_kp <= 10: st.warning("⛔ GESPERRT")
         elif bunker_kp >= 80: st.error("🚨 HOCH")
         else: st.success("✅ Normal")
-
-    bunker_states = {
-        "1 - Sägemehl": bunker_sm,
-        "2 - Hackschnitzel": bunker_hs,
-        "3 - Rinde": bunker_ri,
-        "4 - Kappholz": bunker_kp
-    }
 
 # ==========================================
 # BEREICH 2: KUNDEN-STAMMDATEN
@@ -369,7 +396,7 @@ with st.expander("3. 📋 Wochen-Kontingente Interner Fuhrpark", expanded=True):
             "_Dauer_h": None,
             "Produkt / Artikel": st.column_config.TextColumn("Produkt / Artikel", width="medium"),
             "Kunde": st.column_config.TextColumn("Kunde (Umlaufzeit hh:mm)", width="medium"),
-            "SOLL (Geplante Fuhren)": st.column_config.NumberColumn("SOLL (Geplant)", min_value=0, max_value=50, step=1),
+            "SOLL (Geplante Fuhren)": st.column_config.NumberColumn("SOLL (Geplanned)", min_value=0, max_value=50, step=1),
             "IST (Gebucht)": st.column_config.NumberColumn("IST (Gebucht)", min_value=0, max_value=50),
             "Fix-Termine / Restriktionen": st.column_config.TextColumn("Fix-Termine / Restriktionen", width="large"),
             "Priorität (1-5)": st.column_config.NumberColumn("Priorität (1-5)", min_value=1, max_value=5, step=1)
@@ -396,14 +423,12 @@ with st.expander("3. 📋 Wochen-Kontingente Interner Fuhrpark", expanded=True):
     # KUNDENSPERREN
     st.markdown("#### 🚫 Kundensperren / Annahmestopp")
     all_customer_names = [str(r["Kunde"]).strip() for _, r in edited_cust_db.iterrows() if str(r["Kunde"]).strip()]
-    saved_blocked_custs = saved_data.get("blocked_customers", {})
     
     blocked_customers_by_day = {day: set() for day in WEEKDAYS}
     
     selected_blocked_custs = st.multiselect(
         f"Kunden mit Annahmestopp ab {selected_day} (gilt automatisch für den Rest der Woche):",
         options=all_customer_names,
-        default=saved_blocked_custs.get(selected_day, []),
         key=f"block_cust_{selected_day}",
         on_change=save_persistent_data
     )
@@ -471,18 +496,16 @@ with st.expander("4. 🚛 Fremdspeditionen-Terminal (Manuelle Liste)", expanded=
             st.success("Fremdfuhre verbucht!")
             st.rerun()
 
-    total_ext_soll_trips = int(st.session_state.ext_terminal_db["SOLL (Fuhren)"].sum()) if not st.session_state.ext_terminal_db.empty else 0
-
 # ==========================================
 # BEREICH 5: MANUELLE VERBUCHUNG
 # ==========================================
 with st.expander("5. 🛠️ Manuelle Verbuchung (Eigenfuhrpark)", expanded=False):
     cust_duration_map = {str(r["Kunde"]).strip(): parse_time_str(r["Umlaufzeit (hh:mm)"]) for _, r in edited_cust_db.iterrows() if str(r["Kunde"]).strip()}
     m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
-    m_kunde_raw = m_col1.selectbox("Kunde", list(cust_duration_map.keys()) if cust_duration_map else ["-"])
-    m_prod = m_col2.selectbox("Produkt", PRODUCT_LIST)
-    m_day = m_col3.selectbox("Tag", WEEKDAYS, index=WEEKDAYS.index(selected_day))
-    m_truck = m_col4.selectbox("Fahrzeug", TRUCK_PRIO)
+    m_kunde_raw = m_col1.selectbox("Kunde", list(cust_duration_map.keys()) if cust_duration_map else ["-"], key="m_kunde_sel")
+    m_prod = m_col2.selectbox("Produkt", PRODUCT_LIST, key="m_prod_sel")
+    m_day = m_col3.selectbox("Tag", WEEKDAYS, index=WEEKDAYS.index(selected_day), key="m_day_sel")
+    m_truck = m_col4.selectbox("Fahrzeug", TRUCK_PRIO, key="m_truck_sel")
     m_dauer = cust_duration_map.get(m_kunde_raw, 2.0)
     
     if m_col5.button("⚡ Manuell Verbuchen", use_container_width=True, type="primary") and m_kunde_raw != "-":

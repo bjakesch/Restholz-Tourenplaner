@@ -6,20 +6,17 @@ from firebase_admin import credentials, firestore
 # INITIALISIERUNG MIT SECRETS
 # ==========================================
 @st.cache_resource
+from google.cloud.firestore_v1.services.firestore.transports.rest import FirestoreRestTransport
+
 def init_db():
-    """Initialisiert die Verbindung zu Firestore via Streamlit Secrets."""
     if not firebase_admin._apps:
-        # Secrets als Dictionary auslesen
         key_dict = dict(st.secrets["firebase"])
-        
-        # Zeilenumbrüche im Private Key für Python lesbar machen
-        key_dict["private_key"] = key_dict["private_key"].replace("\\n", "\n")
-        
-        # Firebase mit den Secrets füttern
         cred = credentials.Certificate(key_dict)
         firebase_admin.initialize_app(cred)
         
-    return firestore.client()
+    # Wir zwingen Firestore, das robuste HTTP-Protokoll (REST) zu nutzen!
+    transport = FirestoreRestTransport()
+    return firestore.client(transport=transport)
 
 db = init_db()
 

@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "restholz-dispo-app",
+  "private_key_id": "9d72c020fc51bbf6a477475893201551bcace8d1",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDTUdYoHySTyiLd\n9I+u45U56jEEfjH+1Jvhw5uU3qZAEhlf/6X2F/J8Nta6zQc9OiX4GEyAqG4O2iZq\n5T97dbwMxDRiqH0CS/wb2dJgWWCeWyNWbQrWe07Xues40NHfxqfsgPJxtMf8HG/L\nJFv+MJRFp/JAFqcnAk+FhDT63Dy91U/dH9eA8HFzoMtENnV9Tts6/Sw84CSLzx2Y\nzLL2L9DBjTBEdFBL7ICpt1OHcaLqyR/wNno+njlLbPer+H/AXTqvB9qGdsaSJLVY\ngLJCbJs9HTLMnhB9zlVUxKiPwGYD65If8a16ciNhsGifxQZZM/0kMXJkzS/WjkpP\nxsOyg5v/AgMBAAECggEAD1jVxgHGm3nsrYeOmW1eoxKGqNFGOqZtaihvBJEyLCkK\nve9IU4BKh6OvIjXnUEnVN0vPrCOPV3WXoKyX8nsK3NDkqEQDgC0zv0B2IbICbSQo\ng6UiFypkmXcF+REnwBBVyO+8eKGTSWE1uHnvH52exxUUm0iJ4mPHXrNkhAUgRcqc\nXDNN9/LGp5BiPRI00xxLrtWghdb7/vEqi4q2QccdG5P7gFdnmwkw8zmkPSUvu73G\nTx5IBzSGHjrxiZkWoEN8h+9ok3fv+rWpJ5YqgnX0YMmNM6Xvs7Si3JAewaNF/o1x\nskrNqE+a6/aOu3MXOrhHDDm6kiRBG8zmwjyE7WtlAQKBgQDp6UR7/ZmjKxhRsM4z\nLJf4/mZ5bCKFkVq1pOr2YM2ka0k3SHM26dec+2YxWUEqJ0QkGOHXaQNJ/MkO9l8A\nyNwCIh0SKI5NdwDOT6+QnQOVILEWd5CctH1BAimSD7v6CSn9JQRMoF7gTLdkGuNS\nl3Cchxz6d1FVWKkbrpZCMMsBQQKBgQDnRmz6vQWvf9r4xt4I2BDbfCLmQ3XmmpEn\nx7WqGQridllzUcbMRfZh+DrqnAIgHhQdzrFuPN3AfonunkQM2KAjLLq8Kfza+7of\nl+GbNj3oKoSdvc8+/N5bBOLPfnd1J23FGcCGAwkKeq2HehdHkjMoQwWaKgCjQub1\nk6cYY/4NPwKBgA3EJbyqWy1oLuE355rJaBRGXJ+OxqVXvZ/tGcrwPYoMql1vjSBR\nONhLT2NeHmCtuOvq7vevfXsQPoD77PFt4MzbVxyneGCEvW5m8C0xoHFZYDKzTLZ8\nRNbbmri25lg7y9XTJOKhmZPXz/87Od+1e/IqXYE8HnRIaINxjfRNTNVBAoGBAKGk\nclTJOikQNo58CAGsahPNbmL7sXLMgzmHdqv9NsNTLm/QLx7kozCUGzGQelfSTgML\nTK2csuxwRJ1XVn6YBUywXY9X1VeEavDb6Z3eymPzG59YY3pFqG97Ob8GSB3Ewg7p\nUcsYYgBF//TZW131i/XO6iJ2yt1QzDXFzhrZAF5nAoGATCHSP8cFQrgWCg8kFEKX\n1yJyc7IdgOidWZRFXwbnGRd2YXDXtGBEcwZEsSCYpid4a/rujX8tK08MdOQYmNVn\n1mg4hczfo9u1BTGObFA4U9Jhe+A3Bx9Q+U2M1bZpZWOFXKMjMbufzf9+XvFWRL2i\nRELx4gIASXR/VyN07sYZMzY=\n-----END PRIVATE KEY-----\n",
+  "client_email": "firebase-adminsdk-fbsvc@restholz-dispo-app.iam.gserviceaccount.com",
+  "client_id": "105051652990797960145",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40restholz-dispo-app.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

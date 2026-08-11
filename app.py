@@ -11,6 +11,12 @@ import database as db
 # PAGE CONFIG & PFADE
 # ==========================================
 st.set_page_config(page_title="Restholz-Tourenplaner Sägewerk", layout="wide", page_icon="🪵")
+st.warning("Schritt 1: App gestartet")
+
+if "firebase_loaded" not in st.session_state:
+    st.warning("Schritt 2: Versuche Firebase zu laden...")
+    saved_data = load_persistent_data()
+    st.success("Schritt 3: Firebase erfolgreich geladen!")
 # st_autorefresh(interval=2000, key="auto_reload")
 
 # ==========================================

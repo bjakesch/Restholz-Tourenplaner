@@ -2,22 +2,13 @@ import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime
-from streamlit_autorefresh import st_autorefresh
 
-# Importiere unser neues Datenbank-Modul!
 import database as db
 
 # ==========================================
 # PAGE CONFIG & PFADE
 # ==========================================
 st.set_page_config(page_title="Restholz-Tourenplaner Sägewerk", layout="wide", page_icon="🪵")
-st.warning("Schritt 1: App gestartet")
-
-if "firebase_loaded" not in st.session_state:
-    st.warning("Schritt 2: Versuche Firebase zu laden...")
-    saved_data = load_persistent_data()
-    st.success("Schritt 3: Firebase erfolgreich geladen!")
-# st_autorefresh(interval=2000, key="auto_reload")
 
 # ==========================================
 # CUSTOM CSS (FARBANPASSUNG & KALENDER-STYLES)
@@ -34,7 +25,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOGO_PATH = os.path.join(BASE_DIR, "KELLERHOLZ-CMYK.png")
 
 # ==========================================
 # KONSTANTEN
@@ -46,14 +36,15 @@ TRUCK_PRIO = ["RA KH 14", "RA KH 92", "RA KH 24"]
 EXT_COL_ORDER = ["Produkt / Artikel", "Kunde", "Frachtführer / Spedition", "SOLL (Fuhren)", "IST (Erfüllt)", "Einsatztag", "Bemerkung / Uhrzeit"]
 
 # ==========================================
-# NEUE PERSISTENZ-FUNKTIONEN (VIA FIREBASE)
+# FUNKTIONEN (Müssen vor dem Aufruf definiert werden!)
 # ==========================================
 def load_persistent_data():
-    # Wir rufen die Funktion aus database.py auf, statt eine lokale JSON zu lesen
-    return db.load_app_state()
+    st.warning("⏳ Verbinde mit Firebase...") # DEBUG ANZEIGE
+    data = db.load_app_state()
+    st.success("✅ Firebase Antwort erhalten!") # DEBUG ANZEIGE
+    return data
 
 def save_persistent_data():
-    # Verpackt den aktuellen session_state und schickt ihn an Firebase
     data = {
         "shift_hours": st.session_state.get("shift_hours", 9.0),
         "truck_cap": st.session_state.get("truck_cap", 103),
@@ -73,7 +64,6 @@ def save_persistent_data():
         "booked_trips": st.session_state.get("booked_trips", []),
         "ext_booked_trips": st.session_state.get("ext_booked_trips", [])
     }
-    # Speichern via database.py
     db.save_app_state(data)
 
 def parse_time_str(t_str):
@@ -97,6 +87,7 @@ def format_hours(hours_float):
 # CLOUD STATE-SYNC (Einmalig beim Start)
 # ==========================================
 if "firebase_loaded" not in st.session_state:
+    st.info("🚀 Initialisiere Start-Prozess...")
     saved_data = load_persistent_data()
 
     st.session_state["shift_hours"] = float(saved_data.get("shift_hours", 9.0))

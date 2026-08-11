@@ -11,7 +11,7 @@ import database as db
 # PAGE CONFIG & PFADE
 # ==========================================
 st.set_page_config(page_title="Restholz-Tourenplaner Sägewerk", layout="wide", page_icon="🪵")
-st_autorefresh(interval=2000, key="auto_reload")
+# st_autorefresh(interval=2000, key="auto_reload")
 
 # ==========================================
 # CUSTOM CSS (FARBANPASSUNG & KALENDER-STYLES)

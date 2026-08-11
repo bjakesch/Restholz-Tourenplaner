@@ -88,55 +88,58 @@ def format_hours(hours_float):
     return f"{hrs:02d}:{mins:02d}"
 
 # ==========================================
-# ECHTER STATE-SYNC BEI JEDEM RERUN
+# CLOUD STATE-SYNC (Einmalig beim Start)
 # ==========================================
-saved_data = load_persistent_data()
+if "firebase_loaded" not in st.session_state:
+    saved_data = load_persistent_data()
 
-st.session_state["shift_hours"] = float(saved_data.get("shift_hours", 9.0))
-st.session_state["truck_cap"] = int(saved_data.get("truck_cap", 103))
-st.session_state["selected_day"] = saved_data.get("selected_day", "Montag")
-st.session_state["booked_trips"] = saved_data.get("booked_trips", [])
-st.session_state["ext_booked_trips"] = saved_data.get("ext_booked_trips", [])
+    st.session_state["shift_hours"] = float(saved_data.get("shift_hours", 9.0))
+    st.session_state["truck_cap"] = int(saved_data.get("truck_cap", 103))
+    st.session_state["selected_day"] = saved_data.get("selected_day", "Montag")
+    st.session_state["booked_trips"] = saved_data.get("booked_trips", [])
+    st.session_state["ext_booked_trips"] = saved_data.get("ext_booked_trips", [])
 
-b_saved = saved_data.get("bunkers", {})
-st.session_state["bunker_sm"] = b_saved.get("bunker_sm", 50)
-st.session_state["bunker_hs"] = b_saved.get("bunker_hs", 50)
-st.session_state["bunker_ri"] = b_saved.get("bunker_ri", 50)
-st.session_state["bunker_kp"] = b_saved.get("bunker_kp", 50)
+    b_saved = saved_data.get("bunkers", {})
+    st.session_state["bunker_sm"] = b_saved.get("bunker_sm", 50)
+    st.session_state["bunker_hs"] = b_saved.get("bunker_hs", 50)
+    st.session_state["bunker_ri"] = b_saved.get("bunker_ri", 50)
+    st.session_state["bunker_kp"] = b_saved.get("bunker_kp", 50)
 
-saved_blocked_trucks = saved_data.get("blocked_trucks", {})
-saved_extra_drivers = saved_data.get("extra_drivers", {})
-saved_blocked_custs = saved_data.get("blocked_customers", {})
+    saved_blocked_trucks = saved_data.get("blocked_trucks", {})
+    saved_extra_drivers = saved_data.get("extra_drivers", {})
+    saved_blocked_custs = saved_data.get("blocked_customers", {})
 
-for day in WEEKDAYS:
-    st.session_state[f"block_truck_{day}"] = saved_blocked_trucks.get(day, [])
-    st.session_state[f"extra_driver_{day}"] = saved_extra_drivers.get(day, [])
-    st.session_state[f"block_cust_{day}"] = saved_blocked_custs.get(day, [])
+    for day in WEEKDAYS:
+        st.session_state[f"block_truck_{day}"] = saved_blocked_trucks.get(day, [])
+        st.session_state[f"extra_driver_{day}"] = saved_extra_drivers.get(day, [])
+        st.session_state[f"block_cust_{day}"] = saved_blocked_custs.get(day, [])
 
-if "customer_db" in saved_data and saved_data["customer_db"]:
-    st.session_state["customer_db"] = pd.DataFrame(saved_data["customer_db"])
-elif "customer_db" not in st.session_state:
-    st.session_state["customer_db"] = pd.DataFrame([
-        {"Kunde": "SIAT Urmatt", "Umlaufzeit (hh:mm)": "03:55", "1 - Sägemehl": True, "2 - Hackschnitzel": True, "3 - Rinde": False, "4 - Kappholz": False},
-        {"Kunde": "JRS Ettenheim", "Umlaufzeit (hh:mm)": "03:15", "1 - Sägemehl": True, "2 - Hackschnitzel": False, "3 - Rinde": False, "4 - Kappholz": False},
-        {"Kunde": "Trendel", "Umlaufzeit (hh:mm)": "02:38", "1 - Sägemehl": True, "2 - Hackschnitzel": True, "3 - Rinde": False, "4 - Kappholz": False},
-        {"Kunde": "Rheinspan Germersheim", "Umlaufzeit (hh:mm)": "04:03", "1 - Sägemehl": True, "2 - Hackschnitzel": True, "3 - Rinde": False, "4 - Kappholz": False}
-    ])
+    if "customer_db" in saved_data and saved_data["customer_db"]:
+        st.session_state["customer_db"] = pd.DataFrame(saved_data["customer_db"])
+    else:
+        st.session_state["customer_db"] = pd.DataFrame([
+            {"Kunde": "SIAT Urmatt", "Umlaufzeit (hh:mm)": "03:55", "1 - Sägemehl": True, "2 - Hackschnitzel": True, "3 - Rinde": False, "4 - Kappholz": False},
+            {"Kunde": "JRS Ettenheim", "Umlaufzeit (hh:mm)": "03:15", "1 - Sägemehl": True, "2 - Hackschnitzel": False, "3 - Rinde": False, "4 - Kappholz": False},
+            {"Kunde": "Trendel", "Umlaufzeit (hh:mm)": "02:38", "1 - Sägemehl": True, "2 - Hackschnitzel": True, "3 - Rinde": False, "4 - Kappholz": False},
+            {"Kunde": "Rheinspan Germersheim", "Umlaufzeit (hh:mm)": "04:03", "1 - Sägemehl": True, "2 - Hackschnitzel": True, "3 - Rinde": False, "4 - Kappholz": False}
+        ])
 
-if "ext_terminal_db" in saved_data and saved_data["ext_terminal_db"]:
-    df_ext = pd.DataFrame(saved_data["ext_terminal_db"])
-    st.session_state["ext_terminal_db"] = df_ext.reindex(columns=[c for c in EXT_COL_ORDER if c in df_ext.columns])
-elif "ext_terminal_db" not in st.session_state:
-    st.session_state["ext_terminal_db"] = pd.DataFrame([
-        {"Produkt / Artikel": "1 - Sägemehl", "Kunde": "SIAT Urmatt", "Frachtführer / Spedition": "Spedition Müller", "SOLL (Fuhren)": 0, "IST (Erfüllt)": 0, "Einsatztag": "", "Bemerkung / Uhrzeit": "Avisierung vorab"}
-    ], columns=EXT_COL_ORDER)
+    if "ext_terminal_db" in saved_data and saved_data["ext_terminal_db"]:
+        df_ext = pd.DataFrame(saved_data["ext_terminal_db"])
+        st.session_state["ext_terminal_db"] = df_ext.reindex(columns=[c for c in EXT_COL_ORDER if c in df_ext.columns])
+    else:
+        st.session_state["ext_terminal_db"] = pd.DataFrame([
+            {"Produkt / Artikel": "1 - Sägemehl", "Kunde": "SIAT Urmatt", "Frachtführer / Spedition": "Spedition Müller", "SOLL (Fuhren)": 0, "IST (Erfüllt)": 0, "Einsatztag": "", "Bemerkung / Uhrzeit": "Avisierung vorab"}
+        ], columns=EXT_COL_ORDER)
 
-if "quotas_state" in saved_data and saved_data["quotas_state"]:
-    st.session_state["quotas_state"] = {tuple(k.split("|||")): v for k, v in saved_data["quotas_state"].items()}
-elif "quotas_state" not in st.session_state:
-    st.session_state["quotas_state"] = {
-        ("Rheinspan Germersheim", "2 - Hackschnitzel"): {"soll": 0, "rest": "Zwingend Dienstag 07:00 Uhr", "prio": 4}
-    }
+    if "quotas_state" in saved_data and saved_data["quotas_state"]:
+        st.session_state["quotas_state"] = {tuple(k.split("|||")): v for k, v in saved_data["quotas_state"].items()}
+    else:
+        st.session_state["quotas_state"] = {
+            ("Rheinspan Germersheim", "2 - Hackschnitzel"): {"soll": 0, "rest": "Zwingend Dienstag 07:00 Uhr", "prio": 4}
+        }
+        
+    st.session_state["firebase_loaded"] = True
 
 # ==========================================
 # RESET-LOGIK (CALLBACK)

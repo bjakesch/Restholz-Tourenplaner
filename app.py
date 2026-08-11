@@ -193,8 +193,7 @@ st.sidebar.button("💥 Alles zurücksetzen (Reset)", use_container_width=True, 
 if st.sidebar.button("🔄 Planung neu berechnen", use_container_width=True, type="primary"):
     save_persistent_data()
     st.rerun()
-if __name__ == "__main__":
-    main()
+    
 # ==========================================
 # BEREICH 1: BUNKER-FÜLLSTÄNDE
 # ==========================================

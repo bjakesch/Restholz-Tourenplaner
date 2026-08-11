@@ -3,15 +3,22 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 # ==========================================
-# INITIALISIERUNG
+# INITIALISIERUNG MIT SECRETS
 # ==========================================
 @st.cache_resource
 def init_db():
-    """Initialisiert die Verbindung zu Firestore."""
+    """Initialisiert die Verbindung zu Firestore via Streamlit Secrets."""
     if not firebase_admin._apps:
-        # Erwarte die Datei 'firebase_key.json' im selben Verzeichnis
-        cred = credentials.Certificate("firebase_key.json")
+        # Secrets als Dictionary auslesen
+        key_dict = dict(st.secrets["firebase"])
+        
+        # Zeilenumbrüche im Private Key für Python lesbar machen
+        key_dict["private_key"] = key_dict["private_key"].replace("\\n", "\n")
+        
+        # Firebase mit den Secrets füttern
+        cred = credentials.Certificate(key_dict)
         firebase_admin.initialize_app(cred)
+        
     return firestore.client()
 
 db = init_db()

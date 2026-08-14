@@ -1,4 +1,3 @@
-import logistics
 import streamlit as st
 import pandas as pd
 import os
@@ -6,6 +5,7 @@ from datetime import datetime, timedelta, date
 
 from streamlit_autorefresh import st_autorefresh
 import database as db
+import logistics  # <-- NEU: Unser ausgelagerter Algorithmus!
 
 # ==========================================
 # PAGE CONFIG & PFADE
@@ -269,7 +269,7 @@ with tab_dispo:
 
     st.divider()
 
-    # Algorithmus
+    # --- DATEN FÜR DIE LOGISTICS.PY VORBEREITEN ---
     bunker_levels = {
         "1 - Sägemehl": int(st.session_state.get("bunker_sm", 50)),
         "2 - Hackschnitzel": int(st.session_state.get("bunker_hs", 50)),
@@ -285,6 +285,7 @@ with tab_dispo:
     schedule_by_day = {d.strftime("%Y-%m-%d"): {t: [] for t in TRUCK_PRIO} for d in week_dates}
     truck_used_hours = {d.strftime("%Y-%m-%d"): {t: 0.0 for t in TRUCK_PRIO} for d in week_dates}
 
+    # 1. Fixierte & Manuelle Touren zuerst in den Kalender eintragen
     for b in st.session_state.booked_trips:
         b_date = b.get("Datum")
         b_truck = b.get("Fahrzeug")
@@ -293,59 +294,58 @@ with tab_dispo:
             schedule_by_day[b_date][b_truck].append(b)
             truck_used_hours[b_date][b_truck] += b.get("dauer_h", 2.0)
 
+    # 2. Den Rest durch die externe logistics.py auffüllen lassen
     for d_obj in week_dates:
         d_str = d_obj.strftime("%Y-%m-%d")
         if d_obj < today: continue
             
-        active_trucks = []
-        extra_d_list = []
+        blocked_trucks = []
+        extra_drivers = []
         for t in TRUCK_PRIO:
             status = st.session_state.truck_status_db.get(d_str, {}).get(t, STATUS_VERFUEGBAR)
-            if status != STATUS_AUSFALL:
-                active_trucks.append(t)
-            if status == STATUS_AUSHILFE:
-                extra_d_list.append(t)
+            if status == STATUS_AUSFALL:
+                blocked_trucks.append(t)
+            elif status == STATUS_AUSHILFE:
+                extra_drivers.append(t)
                 
-        truck_max_hours = {t: st.session_state.shift_hours + (4.0 if t in extra_d_list else 0.0) for t in active_trucks}
         blocked_customers_today = st.session_state.get("blocked_customers", {}).get(d_str, [])
 
-        candidates = []
+        offene_kontingente = []
         for (c_name, p_name), rem_qty in remaining_quotas.items():
-            if rem_qty <= 0 or c_name in blocked_customers_today: continue
-            
-            b_level = bunker_levels.get(p_name, 50)
-            if b_level <= 19: continue # Sperrt Fuhren wenn Bunker <= 19%
-                
-            dur = cust_duration_map.get(c_name, 2.0)
-            q_info = st.session_state.quotas_state.get((c_name, p_name), {})
-            
-            score = q_info.get("prio", 3) * 10
-            if b_level >= 80: score += 30
-            elif b_level >= 60: score += 15
-            
-            candidates.append({"Kunde": c_name, "Produkt": p_name, "dauer_h": dur, "score": score, "rest_req": q_info.get("rest", "Keine")})
-            
-        candidates.sort(key=lambda x: x["score"], reverse=True)
+            if rem_qty > 0 and c_name not in blocked_customers_today:
+                dur = cust_duration_map.get(c_name, 2.0)
+                q_info = st.session_state.quotas_state.get((c_name, p_name), {})
+                offene_kontingente.append({
+                    "kunde": c_name,
+                    "produkt": p_name,
+                    "menge_fuhren": rem_qty,
+                    "dauer_h": dur,
+                    "prio": q_info.get("prio", 3),
+                    "bemerkung": q_info.get("rest", "Keine")
+                })
 
-        for cand in candidates:
-            c_key = (cand["Kunde"], cand["Produkt"])
-            while remaining_quotas[c_key] > 0:
-                assigned = False
-                for t in active_trucks:
-                    if truck_used_hours[d_str][t] + cand["dauer_h"] <= truck_max_hours[t] + 0.1:
-                        start_t = 6.0 + truck_used_hours[d_str][t]
-                        schedule_by_day[d_str][t].append({
-                            "id": f"auto_{d_str}_{t}_{len(schedule_by_day[d_str][t])}", "Datum": d_str, "Fahrzeug": t,
-                            "Zeitfenster": f"{format_hours(start_t)} - {format_hours(start_t + cand['dauer_h'])} Uhr",
-                            "Kunde": cand["Kunde"], "Produkt": cand["Produkt"], "Menge_m3": st.session_state.truck_cap,
-                            "dauer_h": cand["dauer_h"], "score": cand["score"], "is_manual": False, "Bemerkung": cand["rest_req"]
-                        })
-                        truck_used_hours[d_str][t] += cand["dauer_h"]
-                        remaining_quotas[c_key] -= 1
-                        assigned = True
-                        break
-                if not assigned: break
+        # --- AUFRUF DER EXTERNEN LOGIK ---
+        berechnete_touren = logistics.calculate_tours(
+            datum=d_str,
+            offene_kontingente=offene_kontingente,
+            blocked_trucks=blocked_trucks,
+            extra_drivers=extra_drivers,
+            bunker_levels=bunker_levels,
+            shift_hours=st.session_state.shift_hours,
+            truck_cap=st.session_state.truck_cap,
+            initial_used_hours=truck_used_hours[d_str] # Hier übergeben wir die manuell verbrauchte Zeit!
+        )
 
+        # Die berechneten Touren nahtlos in den UI-Kalender einsortieren
+        for trip in berechnete_touren:
+            t = trip["Fahrzeug"]
+            trip["id"] = f"auto_{d_str}_{t}_{len(schedule_by_day[d_str][t])}"
+            trip["Datum"] = d_str
+            schedule_by_day[d_str][t].append(trip)
+            truck_used_hours[d_str][t] += trip["dauer_h"]
+            remaining_quotas[(trip["Kunde"], trip["Produkt"])] -= 1
+
+    # 3. Kalender rendern
     cal_cols = st.columns(5)
     for idx, d_obj in enumerate(week_dates):
         d_str = d_obj.strftime("%Y-%m-%d")
@@ -620,7 +620,6 @@ with tab_logbuch:
     with col_log_own:
         st.markdown("### 🚛 Eigenfuhrpark (Diese Woche)")
         
-        # Nur Touren filtern, die in den eingestellten Wochentagen liegen
         valid_date_strs = [d.strftime("%Y-%m-%d") for d in week_dates]
         week_own_trips = [b for b in st.session_state.booked_trips if b.get("Datum") in valid_date_strs]
         
@@ -647,37 +646,32 @@ with tab_logbuch:
         week_ext_trips = []
         week_ext_indices = []
         
-        # Prüfen, ob der Buchungs-Zeitpunkt in die eingestellte Woche (Mo-So) fällt
         for i, b in enumerate(st.session_state.ext_booked_trips):
             z_str = str(b.get("Zeitpunkt", ""))
             try:
-                # Format aus der Buchung ist "%d.%m.%Y %H:%M"
                 b_date = datetime.strptime(z_str.split(" ")[0], "%d.%m.%Y").date()
                 if start_of_week <= b_date <= (start_of_week + timedelta(days=6)):
                     week_ext_trips.append(b)
-                    week_ext_indices.append(i) # Den Original-Index merken wir uns für sauberes Löschen
+                    week_ext_indices.append(i)
             except Exception:
                 pass
                 
         if week_ext_trips:
             df_ext = pd.DataFrame(week_ext_trips)
-            df_ext = df_ext.iloc[::-1] # Reihenfolge umdrehen (neueste oben)
+            df_ext = df_ext.iloc[::-1]
             st.dataframe(df_ext, use_container_width=True, hide_index=True)
             
             st.divider()
             c_del_ext1, c_del_ext2 = st.columns([3, 1])
             
-            # String bauen für die Dropdown-Auswahl (inklusive dem unsichtbaren Index ganz vorn)
             ext_del_options = [f"{orig_idx} | {st.session_state.ext_booked_trips[orig_idx].get('Zeitpunkt')} - {st.session_state.ext_booked_trips[orig_idx].get('Kunde')}" for orig_idx in week_ext_indices]
             
             selected_del_ext_str = c_del_ext1.selectbox("Fremdfuhre stornieren:", options=ext_del_options, key="del_ext_select_box")
             
             if c_del_ext2.button("❌ Löschen", use_container_width=True, type="secondary", key="del_btn_ext"):
-                # Echten Index extrahieren und aus der Liste werfen
                 idx_to_del = int(selected_del_ext_str.split(" | ")[0])
                 deleted_trip = st.session_state.ext_booked_trips.pop(idx_to_del)
                 
-                # ZUSATZLOGIK: Den IST-Zähler beim Kunden wieder um 1 reduzieren!
                 for idx, row in st.session_state.ext_terminal_db.iterrows():
                     if (row.get("Produkt / Artikel") == deleted_trip.get("Produkt") and 
                         row.get("Kunde") == deleted_trip.get("Kunde") and 
@@ -685,7 +679,7 @@ with tab_logbuch:
                         
                         if st.session_state.ext_terminal_db.at[idx, "IST (Erfüllt)"] > 0:
                             st.session_state.ext_terminal_db.at[idx, "IST (Erfüllt)"] -= 1
-                        break # Nur einmal abziehen
+                        break
                         
                 save_persistent_data()
                 st.rerun()

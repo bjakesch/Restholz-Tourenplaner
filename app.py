@@ -361,41 +361,64 @@ with tab_fuhrpark:
         save_persistent_data()
         
     st.divider()
-    st.subheader("Fahrzeug-Verfügbarkeit (Kalender)")
-    st.caption("Änderungen hier werden sofort für den jeweiligen Tag übernommen.")
+    
+    st.subheader("Fahrzeug-Verfügbarkeit (Wochen-Matrix)")
+    st.caption("Hier siehst du exakt die oben eingestellte Planungswoche. Zukünftige Tage stehen automatisch auf 'Verfügbar'.")
     
     truck_db = st.session_state.truck_status_db
-    status_rows = []
-    for i in range(-5, 15):
-        d = start_of_week + timedelta(days=i)
-        if d.weekday() < 5:
-            d_str = d.strftime("%Y-%m-%d")
-            row = {"Datum": d_str, "Wochentag": WEEKDAYS_GERMAN[d.weekday()]}
-            for t in TRUCK_PRIO:
-                row[t] = truck_db.get(d_str, {}).get(t, STATUS_VERFUEGBAR)
-            status_rows.append(row)
+    
+    # 1. Spalten-Namen für die 5 Tage der ausgewählten Woche generieren
+    day_cols = []
+    date_strs = []
+    for d_obj in week_dates:
+        d_str = d_obj.strftime("%Y-%m-%d")
+        # Macht daraus z.B. "Montag, 14.08."
+        col_name = f"{WEEKDAYS_GERMAN[d_obj.weekday()]}, {d_obj.strftime('%d.%m.')}"
+        day_cols.append(col_name)
+        date_strs.append(d_str)
+
+    # 2. Die Matrix aufbauen (Y-Achse: Fahrzeuge, X-Achse: Tage)
+    matrix_rows = []
+    for t in TRUCK_PRIO:
+        row = {"Fahrzeug": t}
+        for d_str, col_name in zip(date_strs, day_cols):
+            # Holt den Wert aus der Datenbank, falls nicht vorhanden, ist der Standard "Verfügbar"
+            row[col_name] = truck_db.get(d_str, {}).get(t, STATUS_VERFUEGBAR)
+        matrix_rows.append(row)
             
-    df_truck_status = pd.DataFrame(status_rows)
+    df_truck_status = pd.DataFrame(matrix_rows)
+    
+    # 3. Spaltenkonfiguration für Streamlit Data Editor
+    col_config = {"Fahrzeug": st.column_config.TextColumn("Fahrzeug", disabled=True)}
+    for col_name in day_cols:
+        col_config[col_name] = st.column_config.SelectboxColumn(
+            col_name, 
+            options=TRUCK_STATUS_OPTIONS, 
+            width="medium"
+        )
     
     edited_trucks = st.data_editor(
         df_truck_status,
         use_container_width=True,
         hide_index=True,
-        disabled=["Datum", "Wochentag"],
-        column_config={
-            "Datum": st.column_config.TextColumn("Datum", width="small"),
-            "Wochentag": st.column_config.TextColumn("Tag", width="small"),
-            **{t: st.column_config.SelectboxColumn(t, options=TRUCK_STATUS_OPTIONS, width="medium") for t in TRUCK_PRIO}
-        }
+        column_config=col_config,
+        # Wenn sich die ausgewählte Woche ändert, zeichnet Streamlit die Tabelle neu
+        key=f"truck_matrix_{start_of_week}" 
     )
     
+    # 4. Änderungen in die Datenbank zurückschreiben
     trucks_changed = False
     for _, row in edited_trucks.iterrows():
-        d_str = row["Datum"]
-        if d_str not in truck_db: truck_db[d_str] = {}
-        for t in TRUCK_PRIO:
-            if truck_db[d_str].get(t) != row[t]:
-                truck_db[d_str][t] = row[t]
+        t = row["Fahrzeug"]
+        for d_str, col_name in zip(date_strs, day_cols):
+            new_status = row[col_name]
+            
+            if d_str not in truck_db: 
+                truck_db[d_str] = {}
+                
+            # Nur speichern, wenn sich der Status verändert hat
+            if truck_db[d_str].get(t, STATUS_VERFUEGBAR) != new_status:
+                truck_db[d_str][t] = new_status
                 trucks_changed = True
                 
     if trucks_changed:

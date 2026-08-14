@@ -2,20 +2,15 @@ import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime, timedelta, date
-
 from streamlit_autorefresh import st_autorefresh
 import streamlit_vertical_slider as svs
-
 import database as db
 
 # ==========================================
-# PAGE CONFIG & PFADE
+# PAGE CONFIG & CSS
 # ==========================================
 st.set_page_config(page_title="Restholz-Tourenplaner", layout="wide", page_icon="🪵")
 
-# ==========================================
-# CUSTOM CSS
-# ==========================================
 st.markdown("""
     <style>
     div[aria-label*="Aushilfsfahrer"] span[data-baseweb="tag"] { background-color: #2e7d32 !important; color: white !important; }
@@ -23,6 +18,7 @@ st.markdown("""
     .cal-card { border-left: 4px solid #1b5e20; background-color: #ffffff; padding: 6px 8px; border-radius: 4px; margin-bottom: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-size: 0.85em; }
     .cal-card-manual { border-left: 4px solid #1976d2; background-color: #f5f9ff; }
     .cal-card-past { border-left: 4px solid #9e9e9e; background-color: #f5f5f5; color: #777;}
+    .stButton button { margin-top: 28px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -39,11 +35,8 @@ STATUS_AUSHILFE = "🟢 Aushilfe (17-21)"
 TRUCK_STATUS_OPTIONS = [STATUS_VERFUEGBAR, STATUS_AUSFALL, STATUS_AUSHILFE]
 
 # ==========================================
-# DATEN-SYNCHRONISIERUNG
+# FUNKTIONEN
 # ==========================================
-def load_persistent_data():
-    return db.load_app_state()
-
 def save_persistent_data():
     data = {
         "shift_hours": st.session_state.get("shift_hours", 9.0),
@@ -64,38 +57,33 @@ def save_persistent_data():
     }
     db.save_app_state(data)
 
-def refresh_data_from_db():
-    saved_data = load_persistent_data()
-    st.session_state["shift_hours"] = float(saved_data.get("shift_hours", 9.0))
-    st.session_state["truck_cap"] = int(saved_data.get("truck_cap", 103))
-    st.session_state["truck_status_db"] = saved_data.get("truck_status_db", {})
-    st.session_state["blocked_customers"] = saved_data.get("blocked_customers", {})
-    
-    b_saved = saved_data.get("bunkers", {})
-    st.session_state["bunker_sm"] = b_saved.get("bunker_sm", 50)
-    st.session_state["bunker_hs"] = b_saved.get("bunker_hs", 50)
-    st.session_state["bunker_ri"] = b_saved.get("bunker_ri", 50)
-    st.session_state["bunker_kp"] = b_saved.get("bunker_kp", 50)
-    
-    if "booked_trips" not in st.session_state or not st.session_state.get("edit_mode", False):
-        st.session_state["booked_trips"] = saved_data.get("booked_trips", [])
-        st.session_state["ext_booked_trips"] = saved_data.get("ext_booked_trips", [])
+def sync_from_db():
+    # Nur synchronisieren, wenn NICHT im Bearbeitungsmodus
+    if not st.session_state.get("edit_mode", False):
+        saved = db.load_app_state()
+        st.session_state["shift_hours"] = float(saved.get("shift_hours", 9.0))
+        st.session_state["truck_cap"] = int(saved.get("truck_cap", 103))
+        st.session_state["truck_status_db"] = saved.get("truck_status_db", {})
+        st.session_state["blocked_customers"] = saved.get("blocked_customers", {})
         
-    if "customer_db" in saved_data and saved_data["customer_db"]:
-        st.session_state["customer_db"] = pd.DataFrame(saved_data["customer_db"])
+        b = saved.get("bunkers", {})
+        st.session_state["bunker_sm"] = b.get("bunker_sm", 50)
+        st.session_state["bunker_hs"] = b.get("bunker_hs", 50)
+        st.session_state["bunker_ri"] = b.get("bunker_ri", 50)
+        st.session_state["bunker_kp"] = b.get("bunker_kp", 50)
         
-    if "ext_terminal_db" in saved_data and saved_data["ext_terminal_db"]:
-        st.session_state["ext_terminal_db"] = pd.DataFrame(saved_data["ext_terminal_db"])
+        st.session_state["booked_trips"] = saved.get("booked_trips", [])
+        st.session_state["ext_booked_trips"] = saved.get("ext_booked_trips", [])
         
-    if "quotas_state" in saved_data and saved_data["quotas_state"]:
-        st.session_state["quotas_state"] = {tuple(k.split("|||")): v for k, v in saved_data["quotas_state"].items()}
+        if "customer_db" in saved: st.session_state["customer_db"] = pd.DataFrame(saved["customer_db"])
+        if "ext_terminal_db" in saved: st.session_state["ext_terminal_db"] = pd.DataFrame(saved["ext_terminal_db"])
+        if "quotas_state" in saved: st.session_state["quotas_state"] = {tuple(k.split("|||")): v for k, v in saved["quotas_state"].items()}
 
 def parse_time_str(t_str):
     try:
         parts = str(t_str).strip().split(":")
         return round(int(parts[0]) + (int(parts[1]) if len(parts) > 1 else 0) / 60.0, 2)
-    except Exception:
-        return 2.0
+    except Exception: return 2.0
 
 def format_hours(hours_float):
     hrs = int(hours_float)
@@ -104,102 +92,44 @@ def format_hours(hours_float):
     return f"{hrs:02d}:{mins:02d}"
 
 # ==========================================
-# START-INITIALISIERUNG
+# INITIALISIERUNG
 # ==========================================
-if "firebase_loaded" not in st.session_state:
-    refresh_data_from_db()
-    st.session_state["firebase_loaded"] = True
-
-if "truck_status_db" not in st.session_state: st.session_state["truck_status_db"] = {}
-if "blocked_customers" not in st.session_state: st.session_state["blocked_customers"] = {}
+if "edit_mode" not in st.session_state: st.session_state["edit_mode"] = False
 if "customer_db" not in st.session_state: st.session_state["customer_db"] = pd.DataFrame()
+sync_from_db() # Einmaliger Initial-Sync
 
 # ==========================================
-# HEADER & REFRESH-STEUERUNG
+# HEADER
 # ==========================================
 col_logo, col_head, col_date, col_status = st.columns([1.5, 4, 3, 3])
-
 with col_logo:
-    if os.path.exists("KELLERHOLZ-CMYK.png"):
-        st.image("KELLERHOLZ-CMYK.png", use_container_width=True)
-    else:
-        st.markdown("<h3 style='color:#1b5e20;'>🪵 KELLERHOLZ</h3>", unsafe_allow_html=True)
-
-with col_head:
-    st.title("Restholz-Tourenplaner")
-
-with col_date:
-    st.write("") 
-    selected_date = st.date_input("📅 Planungswoche (beliebiger Tag)", value=datetime.today().date())
-
+    if os.path.exists("KELLERHOLZ-CMYK.png"): st.image("KELLERHOLZ-CMYK.png", use_container_width=True)
+    else: st.markdown("<h3 style='color:#1b5e20;'>🪵 KELLERHOLZ</h3>", unsafe_allow_html=True)
+with col_head: st.title("Restholz-Tourenplaner")
+with col_date: selected_date = st.date_input("📅 Planungswoche", value=datetime.today().date())
 with col_status:
-    st.write("") 
-    edit_mode = st.toggle("✏️ Bearbeitungsmodus", value=False, key="edit_mode", help="Pausiert das Live-Laden.")
-    
-    if edit_mode:
-        st.warning("⏸️ Auto-refresh inaktiv")
+    st.toggle("✏️ Bearbeitungsmodus", key="edit_mode")
+    if st.session_state.edit_mode: st.warning("⏸️ Refresh pausiert")
     else:
-        st.success("✅ Autorefresh aktiv (5s)")
-        refresh_data_from_db()
-        st_autorefresh(interval=5000, limit=None, key="data_refresh")
+        st.success("✅ Live-Sync aktiv")
+        st_autorefresh(interval=5000, key="datarefresh")
 
 # ==========================================
-# LOGIK & UI
+# UI
 # ==========================================
 today = datetime.now().date()
 start_of_week = selected_date - timedelta(days=selected_date.weekday())
 week_dates = [start_of_week + timedelta(days=i) for i in range(5)]
 
-st.subheader("🏭 Aktuelle Bunker-Füllstände (%)")
-col1, col2, col3, col4 = st.columns(4)
-
-def render_bunker(col, title, key, default):
+st.subheader("🏭 Bunker-Füllstände (%)")
+c1, c2, c3, c4 = st.columns(4)
+for col, lbl, key in zip([c1, c2, c3, c4], ["1 - Sägemehl", "2 - Hackschnitzel", "3 - Rinde", "4 - Kappholz"], ["bunker_sm", "bunker_hs", "bunker_ri", "bunker_kp"]):
     with col:
-        st.markdown(f"<div style='text-align: center;'><strong>{title}</strong></div>", unsafe_allow_html=True)
-        
-        # Sicherstellen, dass der Key im Session State existiert
-        if key not in st.session_state:
-            st.session_state[key] = default
-            
-        old_val = st.session_state[key]
-        
-        # Sauber an den State gekoppelter Regler (verhindert Einfrieren)
-        val = svs.vertical_slider(
-            key=key,
-            default_value=st.session_state[key],
-            step=10,
-            min_value=0,
-            max_value=100,
-            slider_color="#2e7d32",
-            track_color="#dcdcdc"
-        )
-        
-        if val is not None and val != old_val:
-            st.session_state[key] = val
-            save_persistent_data()
-            
-        current_val = st.session_state[key]
-        if current_val <= 10: 
-            st.warning("⛔ GESPERRT")
-        elif current_val >= 80: 
-            st.error("🚨 HOCH")
-        else: 
-            st.success("✅ Normal")
+        v = svs.vertical_slider(key=key, default_value=st.session_state.get(key, 50), step=10, min_value=0, max_value=100)
+        if v is not None and v != st.session_state[key]: st.session_state[key] = v; save_persistent_data()
+        st.success("Normal" if 10 < st.session_state[key] < 80 else ("GESPERRT" if st.session_state[key] <= 10 else "HOCH"))
 
-render_bunker(col1, "1 - Sägemehl", "bunker_sm", 50)
-render_bunker(col2, "2 - Hackschnitzel", "bunker_hs", 50)
-render_bunker(col3, "3 - Rinde", "bunker_ri", 50)
-render_bunker(col4, "4 - Kappholz", "bunker_kp", 50)
-
-st.divider()
-
-edited_cust_db = st.session_state.customer_db
-cust_duration_map = {str(r["Kunde"]).strip(): parse_time_str(r["Umlaufzeit (hh:mm)"]) for _, r in edited_cust_db.iterrows() if str(r["Kunde"]).strip()}
-all_customer_names = [str(r["Kunde"]).strip() for _, r in edited_cust_db.iterrows() if str(r["Kunde"]).strip()]
-
-tab_dispo, tab_fuhrpark, tab_kontingente, tab_abholungen, tab_kunden, tab_logbuch = st.tabs([
-    "📅 Dispokalender", "🚛 Fuhrparkeinstellungen", "📋 Kontingente", "📦 Abholungen", "👥 Kundendatenbank", "📜 Logbuch"
-])
+tab_dispo, tab_fuhrpark, tab_kontingente, tab_abholungen, tab_kunden, tab_logbuch = st.tabs(["📅 Dispokalender", "🚛 Fuhrparkeinstellungen", "📋 Kontingente", "📦 Abholungen", "👥 Kundendatenbank", "📜 Logbuch"])
 
 with tab_dispo:
     st.markdown("### 🛠️ Manuelle Verbuchung (Eigenfuhrpark)")

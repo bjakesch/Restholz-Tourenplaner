@@ -40,7 +40,7 @@ STATUS_AUSHILFE = "🟢 Aushilfe (17-21)"
 TRUCK_STATUS_OPTIONS = [STATUS_VERFUEGBAR, STATUS_AUSFALL, STATUS_AUSHILFE]
 
 # ==========================================
-# DATEN-SYNCHRONISIERUNG
+# DATEN-SYNCHRONISIERUNG (WOCHEN-ISOLIERT)
 # ==========================================
 def load_persistent_data():
     return db.load_app_state()
@@ -58,8 +58,11 @@ def save_persistent_data():
             "bunker_kp": int(st.session_state.get("bunker_kp", 50))
         },
         "customer_db": st.session_state.customer_db.to_dict(orient="records") if "customer_db" in st.session_state else [],
-        "ext_terminal_db": st.session_state.ext_terminal_db.to_dict(orient="records") if "ext_terminal_db" in st.session_state else [],
-        "quotas_state": {f"{k[0]}|||{k[1]}": v for k, v in st.session_state.quotas_state.items()} if "quotas_state" in st.session_state else {},
+        
+        # Neue speicherung wochenweise
+        "ext_terminal_db_by_week": {k: v.to_dict(orient="records") for k, v in st.session_state.get("ext_terminal_db_by_week", {}).items()},
+        "quotas_state": {f"{k[0]}|||{k[1]}|||{k[2]}": v for k, v in st.session_state.get("quotas_state", {}).items()},
+        
         "booked_trips": st.session_state.get("booked_trips", []),
         "ext_booked_trips": st.session_state.get("ext_booked_trips", [])
     }
@@ -94,12 +97,24 @@ def sync_from_db():
             st.session_state["customer_db"] = new_cust_df
             st.session_state["cust_db_version"] = st.session_state.get("cust_db_version", 0) + 1
 
-        new_ext_df = pd.DataFrame(saved.get("ext_terminal_db", []))
-        if "ext_terminal_db" not in st.session_state or not new_ext_df.equals(st.session_state["ext_terminal_db"]):
-            st.session_state["ext_terminal_db"] = new_ext_df
-            st.session_state["ext_db_version"] = st.session_state.get("ext_db_version", 0) + 1
+        # Migration und Sync für wochenbasierte Fremdfuhren
+        saved_ext_by_week = saved.get("ext_terminal_db_by_week", {})
+        if not saved_ext_by_week and "ext_terminal_db" in saved:
+            saved_ext_by_week = {"legacy": saved["ext_terminal_db"]}
             
-        new_quotas = {tuple(k.split("|||")): v for k, v in saved.get("quotas_state", {}).items()}
+        new_ext_by_week = {k: pd.DataFrame(v) for k, v in saved_ext_by_week.items()}
+        st.session_state["ext_terminal_db_by_week"] = new_ext_by_week
+        st.session_state["ext_db_version"] = st.session_state.get("ext_db_version", 0) + 1
+            
+        # Migration und Sync für wochenbasierte Kontingente
+        new_quotas = {}
+        for k_str, v in saved.get("quotas_state", {}).items():
+            parts = k_str.split("|||")
+            if len(parts) == 3:
+                new_quotas[(parts[0], parts[1], parts[2])] = v
+            elif len(parts) == 2:
+                new_quotas[("legacy", parts[0], parts[1])] = v
+                
         if st.session_state.get("quotas_state", {}) != new_quotas:
             st.session_state["quotas_state"] = new_quotas
             st.session_state["quotas_version"] = st.session_state.get("quotas_version", 0) + 1
@@ -163,6 +178,30 @@ with col_status:
 today = datetime.now().date()
 start_of_week = selected_date - timedelta(days=selected_date.weekday())
 week_dates = [start_of_week + timedelta(days=i) for i in range(5)]
+valid_date_strs = [d.strftime("%Y-%m-%d") for d in week_dates]
+
+# Die eindeutige ID der aktuellen Planungswoche (Immer der Montag!)
+week_str = start_of_week.strftime("%Y-%m-%d")
+
+# Wochen-Initialisierung für Abholungen (Falls man in eine neue Woche springt)
+if "ext_terminal_db_by_week" not in st.session_state:
+    st.session_state["ext_terminal_db_by_week"] = {}
+    
+if week_str not in st.session_state["ext_terminal_db_by_week"]:
+    if st.session_state["ext_terminal_db_by_week"]:
+        last_w = max(st.session_state["ext_terminal_db_by_week"].keys())
+        df_last = st.session_state["ext_terminal_db_by_week"][last_w].copy()
+        if not df_last.empty:
+            df_last["SOLL (Fuhren)"] = 0
+            df_last["IST (Erfüllt)"] = 0
+            if "Einsatztag" in df_last.columns:
+                df_last["Einsatztag"] = ""
+            if "Bemerkung / Uhrzeit" in df_last.columns:
+                df_last["Bemerkung / Uhrzeit"] = ""
+        st.session_state["ext_terminal_db_by_week"][week_str] = df_last
+    else:
+        st.session_state["ext_terminal_db_by_week"][week_str] = pd.DataFrame(columns=EXT_COL_ORDER)
+    save_persistent_data()
 
 edited_cust_db = st.session_state.customer_db
 cust_duration_map = {str(r["Kunde"]).strip(): parse_time_str(r["Umlaufzeit (hh:mm)"]) for _, r in edited_cust_db.iterrows() if str(r["Kunde"]).strip()}
@@ -226,7 +265,7 @@ tab_dispo, tab_fuhrpark, tab_kontingente, tab_abholungen, tab_kunden, tab_logbuc
 ])
 
 # ------------------------------------------
-# TAB 1: DISPOKALENDER (Inklusive Unter-Tabs für Auswertung)
+# TAB 1: DISPOKALENDER
 # ------------------------------------------
 with tab_dispo:
     st.markdown("### 🛠️ Manuelle Verbuchung (Eigenfuhrpark)")
@@ -263,9 +302,10 @@ with tab_dispo:
     }
 
     remaining_quotas = {}
-    for k, v in st.session_state.quotas_state.items():
-        already_booked = sum(1 for b in st.session_state.booked_trips if b.get("Kunde") == k[0] and b.get("Produkt") == k[1])
-        remaining_quotas[k] = max(0, v.get("soll", 0) - already_booked)
+    for (w, c, p), v in st.session_state.quotas_state.items():
+        if w == week_str:
+            already_booked = sum(1 for b in st.session_state.booked_trips if b.get("Kunde") == c and b.get("Produkt") == p and b.get("Datum") in valid_date_strs)
+            remaining_quotas[(c, p)] = max(0, v.get("soll", 0) - already_booked)
 
     schedule_by_day = {d.strftime("%Y-%m-%d"): {t: [] for t in TRUCK_PRIO} for d in week_dates}
     truck_used_hours = {d.strftime("%Y-%m-%d"): {t: 0.0 for t in TRUCK_PRIO} for d in week_dates}
@@ -303,7 +343,7 @@ with tab_dispo:
         for (c_name, p_name), rem_qty in remaining_quotas.items():
             if rem_qty > 0 and c_name not in blocked_customers_today:
                 dur = cust_duration_map.get(c_name, 2.0)
-                q_info = st.session_state.quotas_state.get((c_name, p_name), {})
+                q_info = st.session_state.quotas_state.get((week_str, c_name, p_name), {})
                 offene_kontingente.append({
                     "kunde": c_name,
                     "produkt": p_name,
@@ -360,16 +400,11 @@ with tab_dispo:
                         
                         for trip in schedule_by_day[d_str][t]:
                             is_man = trip.get("is_manual", False)
-                            
-                            if is_past: 
-                                card_class, tag_type = "cal-card-past", "🔒"
-                            else:
-                                card_class, tag_type = ("cal-card-manual", "🛠️") if is_man else ("cal-card", "🤖")
+                            card_class, tag_type = ("cal-card-past", "🔒") if is_past else (("cal-card-manual", "🛠️") if is_man else ("cal-card", "🤖"))
                                 
-                            # UI: Score-Badge generieren (mit Tooltip bei Hover)
                             score_html = ""
                             if not is_man and "score" in trip:
-                                s_details = trip.get("score_details", "").replace("\n", "&#10;") # HTML-Zeilenumbruch
+                                s_details = trip.get("score_details", "").replace("\n", "&#10;")
                                 score_html = f"<span title='{s_details}' style='float:right; background:#e8f5e9; color:#1b5e20; padding:1px 6px; border-radius:10px; font-size:0.75em; border:1px solid #c8e6c9; cursor:help;'>🎯 {trip.get('score')}</span>"
                                 
                             st.markdown(f"<div class='{card_class}'>{score_html}<strong>{tag_type} {trip.get('Zeitfenster', '')}</strong> | <b>{trip['Kunde']}</b><br><span style='color:#444;'>📦 {trip['Produkt'].split(' - ')[1] if ' - ' in trip['Produkt'] else trip['Produkt']}</span></div>", unsafe_allow_html=True)
@@ -384,11 +419,14 @@ with tab_dispo:
                                     st.rerun()
 
     with t_ausw:
-        st.markdown("### Kennzahlen zur aktuellen Planungs-Woche")
+        st.markdown("### Kennzahlen zur ausgewählten Planungs-Woche")
         
-        # Berechnungen für das Dashboard
-        valid_date_strs = [d.strftime("%Y-%m-%d") for d in week_dates]
+        # Isolation auf aktuelle Woche
         week_own_count = sum(1 for b in st.session_state.booked_trips if b.get("Datum") in valid_date_strs)
+        eigen_soll = sum(v.get("soll", 0) for (w, c, p), v in st.session_state.quotas_state.items() if w == week_str)
+        
+        current_ext_df = st.session_state.ext_terminal_db_by_week[week_str]
+        ext_soll = current_ext_df["SOLL (Fuhren)"].sum() if not current_ext_df.empty else 0
         
         week_ext_count = 0
         for b in st.session_state.ext_booked_trips:
@@ -399,31 +437,30 @@ with tab_dispo:
                     week_ext_count += 1
             except: pass
             
-        total_soll = sum(v.get("soll", 0) for v in st.session_state.quotas_state.values())
+        total_soll = eigen_soll + ext_soll
         total_ist = week_own_count + week_ext_count
         avg_bunker = sum(bunker_levels.values()) / 4.0
         
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Geplante Fuhren (SOLL Gesamt)", total_soll)
-        m2.metric("Verplant / Erfüllt (IST Gesamt)", total_ist)
-        m3.metric("Verhältnis (Fremd / Eigen)", f"{week_ext_count} / {week_own_count}")
+        m1.metric("Geplante Fuhren (SOLL Gesamt)", total_soll, f"Eigen: {eigen_soll} | Fremd: {ext_soll}", delta_color="off")
+        m2.metric("Verplant / Erfüllt (IST Gesamt)", total_ist, f"Eigen: {week_own_count} | Fremd: {week_ext_count}", delta_color="off")
+        m3.metric("Erfüllungsquote", f"{(total_ist / total_soll * 100) if total_soll > 0 else 0:.1f} %")
         m4.metric("Ø Bunkerstand (Alle Produkte)", f"{avg_bunker:.1f} %")
         
         st.divider()
-        st.markdown("### ⚠️ Nicht realisierbare Fuhren (Rückstand)")
+        st.markdown("### ⚠️ Nicht realisierbare Fuhren (Eigenfuhrpark Rückstand)")
         
         unrealizable = []
         for (c, p), rem in remaining_quotas.items():
             if rem > 0:
                 b_level = bunker_levels.get(p, 50)
-                # Grund herausfinden
                 grund = f"⛔ Bunker gesperrt ({b_level}%)" if b_level <= 19 else "⏳ LKW-Tageskapazitäten ausgeschöpft"
                 unrealizable.append({"Kunde": c, "Produkt": p, "Fehlende Fuhren": rem, "Ursache": grund})
                 
         if unrealizable:
             st.dataframe(pd.DataFrame(unrealizable), use_container_width=True, hide_index=True)
         else:
-            st.success("✅ Hervorragend! Alle Wochen-Kontingente konnten vollständig auf die Fahrzeuge verteilt werden.")
+            st.success("✅ Hervorragend! Alle Wochen-Kontingente für den Eigenfuhrpark konnten auf die Fahrzeuge verteilt werden.")
 
 # ------------------------------------------
 # TAB 2: FUHRPARKEINSTELLUNGEN
@@ -468,7 +505,7 @@ with tab_fuhrpark:
         use_container_width=True,
         hide_index=True,
         column_config=col_config,
-        key=f"truck_matrix_editor_{st.session_state.get('truck_db_version', 0)}" 
+        key=f"truck_matrix_editor_{week_str}_{st.session_state.get('truck_db_version', 0)}" 
     )
     
     trucks_changed = False
@@ -490,10 +527,21 @@ with tab_fuhrpark:
 # ------------------------------------------
 with tab_kontingente:
     st.markdown("### 📋 Wochen-Kontingente (Eigenfuhrpark)")
+    
+    def get_default_quota(c_name, p_name):
+        best_prio = 3
+        best_rest = "Keine"
+        for (w, c, p), val in st.session_state.quotas_state.items():
+            if c == c_name and p == p_name:
+                best_prio = val.get("prio", 3)
+                best_rest = val.get("rest", "Keine")
+        return {"soll": 0, "rest": best_rest, "prio": best_prio}
+
     booked_counts_by_cust_prod = {}
     for b in st.session_state.booked_trips:
-        key = (b.get("Kunde"), b.get("Produkt"))
-        booked_counts_by_cust_prod[key] = booked_counts_by_cust_prod.get(key, 0) + 1
+        if b.get("Datum") in valid_date_strs:
+            key = (b.get("Kunde"), b.get("Produkt"))
+            booked_counts_by_cust_prod[key] = booked_counts_by_cust_prod.get(key, 0) + 1
 
     initial_quota_rows = []
     for p_name in PRODUCT_LIST:
@@ -503,9 +551,12 @@ with tab_kontingente:
             
             t_str = str(c_row.get("Umlaufzeit (hh:mm)", "02:00"))
             if c_row.get(p_name, False):
-                key = (c_name, p_name)
-                prev = st.session_state.quotas_state.get(key, {"soll": 0, "rest": "Keine", "prio": 3})
-                ist = booked_counts_by_cust_prod.get(key, 0)
+                key = (week_str, c_name, p_name)
+                prev = st.session_state.quotas_state.get(key)
+                if not prev:
+                    prev = get_default_quota(c_name, p_name)
+                    
+                ist = booked_counts_by_cust_prod.get((c_name, p_name), 0)
                 
                 initial_quota_rows.append({
                     "Produkt / Artikel": p_name,
@@ -533,12 +584,12 @@ with tab_kontingente:
             "Priorität (1-5)": st.column_config.NumberColumn("Prio", min_value=1, max_value=5, step=1)
         },
         hide_index=True,
-        key=f"quotas_editor_{st.session_state.get('quotas_version', 0)}"
+        key=f"quotas_editor_{week_str}_{st.session_state.get('quotas_version', 0)}"
     )
 
     quotas_changed = False
     for _, row in edited_quotas.iterrows():
-        k = (row["_Kunde_Raw"], row["_Produkt_Raw"])
+        k = (week_str, row["_Kunde_Raw"], row["_Produkt_Raw"])
         new_val = {"soll": int(row["SOLL (Geplante Fuhren)"]), "rest": str(row["Fix-Termine / Restriktionen"]), "prio": int(row["Priorität (1-5)"])}
         if st.session_state.quotas_state.get(k) != new_val:
             st.session_state.quotas_state[k] = new_val
@@ -575,10 +626,11 @@ with tab_kontingente:
 # ------------------------------------------
 with tab_abholungen:
     st.markdown("### 🚛 Fremdspeditionen (Abholungen)")
-    ext_df_display = st.session_state.ext_terminal_db.reindex(columns=EXT_COL_ORDER)
+    
+    current_ext_df = st.session_state.ext_terminal_db_by_week[week_str]
 
     edited_ext_db = st.data_editor(
-        ext_df_display,
+        current_ext_df,
         use_container_width=True,
         num_rows="dynamic",
         column_config={
@@ -590,11 +642,11 @@ with tab_abholungen:
             "Einsatztag": st.column_config.TextColumn("Tag(e) (z.B. Montag, Dienstag)", default=""),
         },
         hide_index=True,
-        key=f"ext_terminal_editor_{st.session_state.get('ext_db_version', 0)}"
+        key=f"ext_terminal_editor_{week_str}_{st.session_state.get('ext_db_version', 0)}"
     )
 
-    if not edited_ext_db.equals(st.session_state.ext_terminal_db):
-        st.session_state.ext_terminal_db = edited_ext_db
+    if not edited_ext_db.equals(current_ext_df):
+        st.session_state.ext_terminal_db_by_week[week_str] = edited_ext_db
         save_persistent_data()
 
     if not edited_ext_db.empty:
@@ -610,9 +662,10 @@ with tab_abholungen:
         
         if col_btn_ext.button("📌 +1 Verbuchen", use_container_width=True, type="primary"):
             row_idx = ext_options.index(selected_ext_idx_str)
-            st.session_state.ext_terminal_db.at[row_idx, "IST (Erfüllt)"] += 1
             
-            booked_row = st.session_state.ext_terminal_db.iloc[row_idx]
+            st.session_state.ext_terminal_db_by_week[week_str].at[row_idx, "IST (Erfüllt)"] += 1
+            booked_row = st.session_state.ext_terminal_db_by_week[week_str].iloc[row_idx]
+            
             st.session_state.ext_booked_trips.append({
                 "Zeitpunkt": datetime.now().strftime("%d.%m.%Y %H:%M"),
                 "Produkt": booked_row.get("Produkt / Artikel"),
@@ -659,7 +712,6 @@ with tab_logbuch:
     with col_log_own:
         st.markdown("### 🚛 Eigenfuhrpark (Diese Woche)")
         
-        valid_date_strs = [d.strftime("%Y-%m-%d") for d in week_dates]
         week_own_trips = [b for b in st.session_state.booked_trips if b.get("Datum") in valid_date_strs]
         
         if week_own_trips:
@@ -711,15 +763,18 @@ with tab_logbuch:
                 idx_to_del = int(selected_del_ext_str.split(" | ")[0])
                 deleted_trip = st.session_state.ext_booked_trips.pop(idx_to_del)
                 
-                for idx, row in st.session_state.ext_terminal_db.iterrows():
+                # Zähler in der isolierten Woche reduzieren
+                ext_df = st.session_state.ext_terminal_db_by_week[week_str]
+                for idx, row in ext_df.iterrows():
                     if (row.get("Produkt / Artikel") == deleted_trip.get("Produkt") and 
                         row.get("Kunde") == deleted_trip.get("Kunde") and 
                         row.get("Frachtführer / Spedition") == deleted_trip.get("Spedition")):
                         
-                        if st.session_state.ext_terminal_db.at[idx, "IST (Erfüllt)"] > 0:
-                            st.session_state.ext_terminal_db.at[idx, "IST (Erfüllt)"] -= 1
+                        if ext_df.at[idx, "IST (Erfüllt)"] > 0:
+                            ext_df.at[idx, "IST (Erfüllt)"] -= 1
                         break
                         
+                st.session_state.ext_terminal_db_by_week[week_str] = ext_df
                 save_persistent_data()
                 st.rerun()
         else:

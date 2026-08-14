@@ -148,11 +148,11 @@ def perform_global_reset():
 col_logo, col_head, col_date, col_status = st.columns([1.5, 4, 3, 3])
 
 with col_logo:
-    if os.path.exists("logo.png"):
-        st.image("logo.png", use_container_width=True)
-    elif os.path.exists("logo.jpg"):
-        st.image("logo.jpg", use_container_width=True)
+    # Lade das exakte Kellerholz-Logo aus dem Main-Branch
+    if os.path.exists("KELLERHOLZ-CMYK.png"):
+        st.image("KELLERHOLZ-CMYK.png", use_container_width=True)
     else:
+        # Fallback, falls das Bild beim Laden kurz verzögert
         st.markdown("<h3 style='color:#1b5e20;'>🪵 KELLERHOLZ</h3>", unsafe_allow_html=True)
 
 with col_head:

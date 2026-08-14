@@ -17,16 +17,13 @@ def calculate_base_score(prio, bunker_level, combined_sm_hs, dauer_h):
     """
     breakdown = []
     
-    # 1. Grund-Prio
     score = prio * 10
     breakdown.append(f"Grund-Prio ({prio}): +{score}")
     
-    # 2. Bunker-Zuschlag (nur noch bei >= 80%)
     if bunker_level >= 80: 
         score += 30  
         breakdown.append(f"Bunker kritisch ({bunker_level}%): +30")
         
-    # 3. Logik für kombiniertes Volumen (Sägemehl + Hackschnitzel)
     if combined_sm_hs > 130:
         if dauer_h < 2.5:
             score += 50
@@ -112,10 +109,9 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
                 continue
                 
             current_score = cand["base_score"]
-            current_bd = cand["breakdown"].copy() # Kopie, damit der Bonus nicht mehrfach angehängt wird
+            current_bd = cand["breakdown"].copy()
             p_name = cand["Produkt"]
             
-            # Wechsel-Bonus prüfen
             if current_last_product == "1 - Sägemehl" and p_name == "2 - Hackschnitzel":
                 current_score += 20
                 current_bd.append("Wechsel Säge->Hack: +20")
@@ -123,7 +119,6 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
                 current_score += 20
                 current_bd.append("Wechsel Hack->Säge: +20")
                 
-            # LKW suchen
             truck_fits = None
             for t in active_trucks:
                 if truck_used_hours[t] + cand["dauer_h"] <= truck_max_hours[t] + 0.1:
@@ -156,10 +151,18 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
             "Menge_m3": truck_cap,
             "dauer_h": best_cand["dauer_h"],
             "score": max_score,
-            "score_details": best_breakdown_str, # Speichert die Erklärung!
+            "score_details": best_breakdown_str, 
             "is_manual": False,
             "Bemerkung": best_cand["rest_req"]
         }
         berechnete_touren.append(trip_obj)
         
-    return berechnete_touren
+    # 4. WIRTSCHAFTLICHKEITSPRÜFUNG (< 4.0h)
+    # LKW, die am Ende des Tages weniger als 4 Stunden Auslastung haben, werden komplett entladen.
+    final_touren = []
+    for trip in berechnete_touren:
+        t = trip["Fahrzeug"]
+        if truck_used_hours[t] >= 4.0:
+            final_touren.append(trip)
+            
+    return final_touren

@@ -40,7 +40,7 @@ STATUS_AUSHILFE = "🟢 Aushilfe (17-21)"
 TRUCK_STATUS_OPTIONS = [STATUS_VERFUEGBAR, STATUS_AUSFALL, STATUS_AUSHILFE]
 
 # ==========================================
-# DATEN-SYNCHRONISIERUNG (VERSION KEY PATTERN)
+# DATEN-SYNCHRONISIERUNG
 # ==========================================
 def load_persistent_data():
     return db.load_app_state()
@@ -226,7 +226,7 @@ tab_dispo, tab_fuhrpark, tab_kontingente, tab_abholungen, tab_kunden, tab_logbuc
 ])
 
 # ------------------------------------------
-# TAB 1: DISPOKALENDER
+# TAB 1: DISPOKALENDER (Inklusive Unter-Tabs für Auswertung)
 # ------------------------------------------
 with tab_dispo:
     st.markdown("### 🛠️ Manuelle Verbuchung (Eigenfuhrpark)")
@@ -254,7 +254,7 @@ with tab_dispo:
 
     st.divider()
 
-    # --- DATEN FÜR DIE LOGISTICS.PY VORBEREITEN ---
+    # --- DATEN VORBEREITEN & ALGORITHMUS LAUFEN LASSEN ---
     bunker_levels = {
         "1 - Sägemehl": int(st.session_state.get("bunker_sm", 50)),
         "2 - Hackschnitzel": int(st.session_state.get("bunker_hs", 50)),
@@ -271,12 +271,10 @@ with tab_dispo:
     truck_used_hours = {d.strftime("%Y-%m-%d"): {t: 0.0 for t in TRUCK_PRIO} for d in week_dates}
     truck_tour_counts = {d.strftime("%Y-%m-%d"): {t: 0 for t in TRUCK_PRIO} for d in week_dates}
 
-    # Den zuletzt gebuchten Eintrag (für den Start-Wechsel-Bonus) auslesen
     last_prod_tracker = None
     if st.session_state.booked_trips:
         last_prod_tracker = st.session_state.booked_trips[-1].get("Produkt")
 
-    # 1. Fixierte & Manuelle Touren einlesen
     for b in st.session_state.booked_trips:
         b_date = b.get("Datum")
         b_truck = b.get("Fahrzeug")
@@ -286,7 +284,6 @@ with tab_dispo:
             truck_used_hours[b_date][b_truck] += b.get("dauer_h", 2.0)
             truck_tour_counts[b_date][b_truck] += 1
 
-    # 2. Durch logistics.py berechnen lassen
     for d_obj in week_dates:
         d_str = d_obj.strftime("%Y-%m-%d")
         if d_obj < today: continue
@@ -336,52 +333,102 @@ with tab_dispo:
             schedule_by_day[d_str][t].append(trip)
             truck_used_hours[d_str][t] += trip["dauer_h"]
             remaining_quotas[(trip["Kunde"], trip["Produkt"])] -= 1
-            last_prod_tracker = trip["Produkt"] # Tracker updaten für den nächsten Tag!
+            last_prod_tracker = trip["Produkt"]
 
-    # 3. Kalender rendern
-    cal_cols = st.columns(5)
-    for idx, d_obj in enumerate(week_dates):
-        d_str = d_obj.strftime("%Y-%m-%d")
-        w_day = WEEKDAYS_GERMAN[d_obj.weekday()]
-        is_past = d_obj < today
-        
-        with cal_cols[idx]:
-            header_color = "#e0e0e0" if is_past else "#f0f2f6"
-            st.markdown(f"<div class='cal-day-header' style='background-color:{header_color}'>{w_day}, {d_obj.strftime('%d.%m.')}</div>", unsafe_allow_html=True)
+    # --- UNTER-REITER FÜR KALENDER & AUSWERTUNG ---
+    t_cal, t_ausw = st.tabs(["📅 Planungskalender", "📊 Wochen-Auswertung"])
+    
+    with t_cal:
+        cal_cols = st.columns(5)
+        for idx, d_obj in enumerate(week_dates):
+            d_str = d_obj.strftime("%Y-%m-%d")
+            w_day = WEEKDAYS_GERMAN[d_obj.weekday()]
+            is_past = d_obj < today
             
-            for t in TRUCK_PRIO:
-                status = st.session_state.truck_status_db.get(d_str, {}).get(t, STATUS_VERFUEGBAR)
+            with cal_cols[idx]:
+                header_color = "#e0e0e0" if is_past else "#f0f2f6"
+                st.markdown(f"<div class='cal-day-header' style='background-color:{header_color}'>{w_day}, {d_obj.strftime('%d.%m.')}</div>", unsafe_allow_html=True)
                 
-                if status == STATUS_AUSFALL:
-                    st.markdown(f"**🚛 {t}** <span style='color:red;'>❌ Ausfall</span>", unsafe_allow_html=True)
-                else:
-                    badge = "🟢" if status == STATUS_AUSHILFE else "✅"
-                    st.markdown(f"**🚛 {t}** {badge} <small>({truck_used_hours[d_str][t]:.1f}h)</small>", unsafe_allow_html=True)
+                for t in TRUCK_PRIO:
+                    status = st.session_state.truck_status_db.get(d_str, {}).get(t, STATUS_VERFUEGBAR)
                     
-                    for trip in schedule_by_day[d_str][t]:
-                        is_man = trip.get("is_manual", False)
+                    if status == STATUS_AUSFALL:
+                        st.markdown(f"**🚛 {t}** <span style='color:red;'>❌ Ausfall</span>", unsafe_allow_html=True)
+                    else:
+                        badge = "🟢" if status == STATUS_AUSHILFE else "✅"
+                        st.markdown(f"**🚛 {t}** {badge} <small>({truck_used_hours[d_str][t]:.1f}h)</small>", unsafe_allow_html=True)
                         
-                        if is_past: 
-                            card_class, tag_type = "cal-card-past", "🔒"
-                        else:
-                            card_class, tag_type = ("cal-card-manual", "🛠️") if is_man else ("cal-card", "🤖")
+                        for trip in schedule_by_day[d_str][t]:
+                            is_man = trip.get("is_manual", False)
                             
-                        # UI Update: Zeigt nun "Tour 1" oder "Manuell" statt der Uhrzeit an!
-                        st.markdown(f"""
-                        <div class="{card_class}">
-                            <strong>{tag_type} {trip.get('Zeitfenster', '')}</strong> | <b>{trip['Kunde']}</b><br>
-                            <span style="color:#444;">📦 {trip['Produkt'].split(' - ')[1] if ' - ' in trip['Produkt'] else trip['Produkt']}</span>
-                        </div>""", unsafe_allow_html=True)
-                        
-                        if not is_man and not is_past:
-                            if st.button(f"📌 Fixieren", key=f"btn_book_{d_str}_{t}_{trip['id']}"):
-                                trip["is_manual"] = True
-                                # Damit nach dem manuellen Fixieren die Tournummern nicht zu "Manuell" wechseln
-                                if trip.get('Zeitfenster') == "Manuell":
-                                    trip['Zeitfenster'] = f"Tour {truck_tour_counts[d_str][t] + 1} (Fix)"
-                                st.session_state.booked_trips.append(trip)
-                                save_persistent_data()
-                                st.rerun()
+                            if is_past: 
+                                card_class, tag_type = "cal-card-past", "🔒"
+                            else:
+                                card_class, tag_type = ("cal-card-manual", "🛠️") if is_man else ("cal-card", "🤖")
+                                
+                            # UI: Score-Badge generieren (mit Tooltip bei Hover)
+                            score_html = ""
+                            if not is_man and "score" in trip:
+                                s_details = trip.get("score_details", "").replace("\n", "&#10;") # HTML-Zeilenumbruch
+                                score_html = f"<span title='{s_details}' style='float:right; background:#e8f5e9; color:#1b5e20; padding:1px 6px; border-radius:10px; font-size:0.75em; border:1px solid #c8e6c9; cursor:help;'>🎯 {trip.get('score')}</span>"
+                                
+                            st.markdown(f"""
+                            <div class="{card_class}">
+                                {score_html}
+                                <strong>{tag_type} {trip.get('Zeitfenster', '')}</strong> | <b>{trip['Kunde']}</b><br>
+                                <span style="color:#444;">📦 {trip['Produkt'].split(' - ')[1] if ' - ' in trip['Produkt'] else trip['Produkt']}</span>
+                            </div>""", unsafe_allow_html=True)
+                            
+                            if not is_man and not is_past:
+                                if st.button(f"📌 Fixieren", key=f"btn_book_{d_str}_{t}_{trip['id']}"):
+                                    trip["is_manual"] = True
+                                    if trip.get('Zeitfenster') == "Manuell":
+                                        trip['Zeitfenster'] = f"Tour {truck_tour_counts[d_str][t] + 1} (Fix)"
+                                    st.session_state.booked_trips.append(trip)
+                                    save_persistent_data()
+                                    st.rerun()
+
+    with t_ausw:
+        st.markdown("### Kennzahlen zur aktuellen Planungs-Woche")
+        
+        # Berechnungen für das Dashboard
+        valid_date_strs = [d.strftime("%Y-%m-%d") for d in week_dates]
+        week_own_count = sum(1 for b in st.session_state.booked_trips if b.get("Datum") in valid_date_strs)
+        
+        week_ext_count = 0
+        for b in st.session_state.ext_booked_trips:
+            z_str = str(b.get("Zeitpunkt", ""))
+            try:
+                b_date = datetime.strptime(z_str.split(" ")[0], "%d.%m.%Y").date()
+                if start_of_week <= b_date <= (start_of_week + timedelta(days=6)):
+                    week_ext_count += 1
+            except: pass
+            
+        total_soll = sum(v.get("soll", 0) for v in st.session_state.quotas_state.values())
+        total_ist = week_own_count + week_ext_count
+        avg_bunker = sum(bunker_levels.values()) / 4.0
+        
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Geplante Fuhren (SOLL Gesamt)", total_soll)
+        m2.metric("Verplant / Erfüllt (IST Gesamt)", total_ist)
+        m3.metric("Verhältnis (Fremd / Eigen)", f"{week_ext_count} / {week_own_count}")
+        m4.metric("Ø Bunkerstand (Alle Produkte)", f"{avg_bunker:.1f} %")
+        
+        st.divider()
+        st.markdown("### ⚠️ Nicht realisierbare Fuhren (Rückstand)")
+        
+        unrealizable = []
+        for (c, p), rem in remaining_quotas.items():
+            if rem > 0:
+                b_level = bunker_levels.get(p, 50)
+                # Grund herausfinden
+                grund = f"⛔ Bunker gesperrt ({b_level}%)" if b_level <= 19 else "⏳ LKW-Tageskapazitäten ausgeschöpft"
+                unrealizable.append({"Kunde": c, "Produkt": p, "Fehlende Fuhren": rem, "Ursache": grund})
+                
+        if unrealizable:
+            st.dataframe(pd.DataFrame(unrealizable), use_container_width=True, hide_index=True)
+        else:
+            st.success("✅ Hervorragend! Alle Wochen-Kontingente konnten vollständig auf die Fahrzeuge verteilt werden.")
 
 # ------------------------------------------
 # TAB 2: FUHRPARKEINSTELLUNGEN

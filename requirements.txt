@@ -4,3 +4,4 @@ matplotlib
 streamlit-autorefresh
 firebase-admin
 google-cloud-firestore
+streamlit-vertical-slider

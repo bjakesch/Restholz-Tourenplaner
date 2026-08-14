@@ -613,20 +613,80 @@ with tab_kunden:
 # TAB 6: LOGBUCH
 # ------------------------------------------
 with tab_logbuch:
-    st.markdown("### Historie des Eigenfuhrparks")
-    if st.session_state.booked_trips:
-        df_booked = pd.DataFrame(st.session_state.booked_trips)
-        df_booked = df_booked.sort_values(by="Datum", ascending=False)
-        st.dataframe(df_booked, use_container_width=True, hide_index=True)
+    col_log_own, col_log_ext = st.columns(2)
+    
+    # ---------------- EIGENFUHRPARK ----------------
+    with col_log_own:
+        st.markdown("### 🚛 Eigenfuhrpark (Diese Woche)")
         
-        st.divider()
-        c_del1, c_del2 = st.columns([3, 1])
-        selected_del_id = c_del1.selectbox("Tour stornieren:", options=[b.get("id") for b in st.session_state.booked_trips if "id" in b], key="del_trip_select_box")
-        if c_del2.button("❌ Löschen", use_container_width=True, type="secondary"):
-            st.session_state.booked_trips = [b for b in st.session_state.booked_trips if b.get("id") != selected_del_id]
-            save_persistent_data()
-            st.rerun()
+        # Nur Touren filtern, die in den eingestellten Wochentagen liegen
+        valid_date_strs = [d.strftime("%Y-%m-%d") for d in week_dates]
+        week_own_trips = [b for b in st.session_state.booked_trips if b.get("Datum") in valid_date_strs]
+        
+        if week_own_trips:
+            df_booked = pd.DataFrame(week_own_trips)
+            df_booked = df_booked.sort_values(by="Datum", ascending=False)
+            st.dataframe(df_booked, use_container_width=True, hide_index=True)
+            
+            st.divider()
+            c_del1, c_del2 = st.columns([3, 1])
+            selected_del_id = c_del1.selectbox("Tour stornieren:", options=[b.get("id") for b in week_own_trips if "id" in b], key="del_trip_select_box")
+            
+            if c_del2.button("❌ Löschen", use_container_width=True, type="secondary", key="del_btn_own"):
+                st.session_state.booked_trips = [b for b in st.session_state.booked_trips if b.get("id") != selected_del_id]
+                save_persistent_data()
+                st.rerun()
+        else:
+            st.info("In dieser Woche wurden noch keine Touren für den Eigenfuhrpark verbucht.")
 
-    st.markdown("### Historie der Fremdfuhren")
-    if st.session_state.ext_booked_trips:
-        st.dataframe(pd.DataFrame(st.session_state.ext_booked_trips), use_container_width=True, hide_index=True)
+    # ---------------- FREMDFUHREN ----------------
+    with col_log_ext:
+        st.markdown("### 📦 Fremdfuhren (Diese Woche)")
+        
+        week_ext_trips = []
+        week_ext_indices = []
+        
+        # Prüfen, ob der Buchungs-Zeitpunkt in die eingestellte Woche (Mo-So) fällt
+        for i, b in enumerate(st.session_state.ext_booked_trips):
+            z_str = str(b.get("Zeitpunkt", ""))
+            try:
+                # Format aus der Buchung ist "%d.%m.%Y %H:%M"
+                b_date = datetime.strptime(z_str.split(" ")[0], "%d.%m.%Y").date()
+                if start_of_week <= b_date <= (start_of_week + timedelta(days=6)):
+                    week_ext_trips.append(b)
+                    week_ext_indices.append(i) # Den Original-Index merken wir uns für sauberes Löschen
+            except Exception:
+                pass
+                
+        if week_ext_trips:
+            df_ext = pd.DataFrame(week_ext_trips)
+            df_ext = df_ext.iloc[::-1] # Reihenfolge umdrehen (neueste oben)
+            st.dataframe(df_ext, use_container_width=True, hide_index=True)
+            
+            st.divider()
+            c_del_ext1, c_del_ext2 = st.columns([3, 1])
+            
+            # String bauen für die Dropdown-Auswahl (inklusive dem unsichtbaren Index ganz vorn)
+            ext_del_options = [f"{orig_idx} | {st.session_state.ext_booked_trips[orig_idx].get('Zeitpunkt')} - {st.session_state.ext_booked_trips[orig_idx].get('Kunde')}" for orig_idx in week_ext_indices]
+            
+            selected_del_ext_str = c_del_ext1.selectbox("Fremdfuhre stornieren:", options=ext_del_options, key="del_ext_select_box")
+            
+            if c_del_ext2.button("❌ Löschen", use_container_width=True, type="secondary", key="del_btn_ext"):
+                # Echten Index extrahieren und aus der Liste werfen
+                idx_to_del = int(selected_del_ext_str.split(" | ")[0])
+                deleted_trip = st.session_state.ext_booked_trips.pop(idx_to_del)
+                
+                # ZUSATZLOGIK: Den IST-Zähler beim Kunden wieder um 1 reduzieren!
+                for idx, row in st.session_state.ext_terminal_db.iterrows():
+                    if (row.get("Produkt / Artikel") == deleted_trip.get("Produkt") and 
+                        row.get("Kunde") == deleted_trip.get("Kunde") and 
+                        row.get("Frachtführer / Spedition") == deleted_trip.get("Spedition")):
+                        
+                        if st.session_state.ext_terminal_db.at[idx, "IST (Erfüllt)"] > 0:
+                            st.session_state.ext_terminal_db.at[idx, "IST (Erfüllt)"] -= 1
+                        break # Nur einmal abziehen
+                        
+                save_persistent_data()
+                st.rerun()
+        else:
+            st.info("In dieser Woche wurden noch keine Fremdfuhren verbucht.")

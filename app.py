@@ -51,6 +51,7 @@ def save_persistent_data():
         "shift_hours": st.session_state.get("shift_hours", 9.0),
         "truck_cap": st.session_state.get("truck_cap", 103),
         "truck_status_db": st.session_state.get("truck_status_db", {}),
+        "blocked_customers": st.session_state.get("blocked_customers", {}),
         "bunkers": {
             "bunker_sm": st.session_state.get("bunker_sm", 50),
             "bunker_hs": st.session_state.get("bunker_hs", 50),
@@ -87,6 +88,7 @@ if "firebase_loaded" not in st.session_state:
     st.session_state["shift_hours"] = float(saved_data.get("shift_hours", 9.0))
     st.session_state["truck_cap"] = int(saved_data.get("truck_cap", 103))
     st.session_state["truck_status_db"] = saved_data.get("truck_status_db", {})
+    st.session_state["blocked_customers"] = saved_data.get("blocked_customers", {})
 
     # Bunkerstufen laden
     b_saved = saved_data.get("bunkers", {})
@@ -123,9 +125,15 @@ if "firebase_loaded" not in st.session_state:
         
     st.session_state["firebase_loaded"] = True
 
+# --- SICHERHEITS-CHECK ---
+if "truck_status_db" not in st.session_state:
+    st.session_state["truck_status_db"] = {}
+if "blocked_customers" not in st.session_state:
+    st.session_state["blocked_customers"] = {}
+
 def perform_global_reset():
     reset_data = {
-        "shift_hours": 9.0, "truck_cap": 103, "truck_status_db": {},
+        "shift_hours": 9.0, "truck_cap": 103, "truck_status_db": {}, "blocked_customers": {},
         "bunkers": {"bunker_sm": 50, "bunker_hs": 50, "bunker_ri": 50, "bunker_kp": 50},
         "customer_db": st.session_state.customer_db.to_dict(orient="records"),
         "ext_terminal_db": [{"Produkt / Artikel": "1 - Sägemehl", "Kunde": "", "Frachtführer / Spedition": "", "SOLL (Fuhren)": 0, "IST (Erfüllt)": 0, "Einsatztag": "", "Bemerkung / Uhrzeit": ""}],
@@ -137,18 +145,25 @@ def perform_global_reset():
 # ==========================================
 # HEADER, DATUM & AUTO-REFRESH LOGIK
 # ==========================================
-col_head, col_date, col_status = st.columns([5, 3, 3])
+col_logo, col_head, col_date, col_status = st.columns([1.5, 4, 3, 3])
+
+with col_logo:
+    if os.path.exists("logo.png"):
+        st.image("logo.png", use_container_width=True)
+    elif os.path.exists("logo.jpg"):
+        st.image("logo.jpg", use_container_width=True)
+    else:
+        st.markdown("<h3 style='color:#1b5e20;'>🪵 KELLERHOLZ</h3>", unsafe_allow_html=True)
 
 with col_head:
-    st.title("🪵 Tourenplaner")
+    st.title("Restholz-Tourenplaner")
 
 with col_date:
-    st.write("") # Platzhalter
-    # DER NEUE DATUMS-WÄHLER (Echtzeit Kalender)
+    st.write("") 
     selected_date = st.date_input("📅 Planungswoche (beliebiger Tag)", value=datetime.today().date())
 
 with col_status:
-    st.write("")
+    st.write("") 
     edit_mode = st.toggle("✏️ Bearbeitungsmodus", value=False, help="Pausiert das Live-Laden für Eingaben.")
     if edit_mode:
         st.warning("⏸️ Auto-refresh inaktiv")
@@ -160,9 +175,7 @@ with col_status:
 # DATUMS-BERECHNUNG FÜR DIE WOCHE
 # ==========================================
 today = datetime.now().date()
-# Berechne den Montag der aktuell ausgewählten Woche
 start_of_week = selected_date - timedelta(days=selected_date.weekday())
-# Generiere eine Liste der 5 Arbeitstage (Mo - Fr)
 week_dates = [start_of_week + timedelta(days=i) for i in range(5)]
 
 # ==========================================
@@ -191,79 +204,29 @@ render_bunker(col4, "4 - Kappholz", "bunker_kp", 50)
 st.divider()
 
 # ==========================================
-# WORKSPACES (Tabs)
+# HILFSVARIABLEN (Global für Tabs)
 # ==========================================
-tab_dispo, tab_manuell, tab_stammdaten, tab_fuhrpark, tab_historie = st.tabs([
-    "📅 Disposition & Kalender", 
-    "🛠️ Manuelle Buchungen", 
-    "⚙️ Stammdaten & Kontingente", 
-    "🚛 Fuhrpark & Einstellungen",
+edited_cust_db = st.session_state.customer_db
+cust_duration_map = {str(r["Kunde"]).strip(): parse_time_str(r["Umlaufzeit (hh:mm)"]) for _, r in edited_cust_db.iterrows() if str(r["Kunde"]).strip()}
+all_customer_names = [str(r["Kunde"]).strip() for _, r in edited_cust_db.iterrows() if str(r["Kunde"]).strip()]
+
+# ==========================================
+# WORKSPACES (Tabs in neuer Reihenfolge)
+# ==========================================
+tab_dispo, tab_fuhrpark, tab_kontingente, tab_abholungen, tab_kunden, tab_logbuch = st.tabs([
+    "📅 Dispokalender", 
+    "🚛 Fuhrparkeinstellungen", 
+    "📋 Kontingente", 
+    "📦 Abholungen",
+    "👥 Kundendatenbank", 
     "📜 Logbuch"
 ])
 
-# ------------------------------------------
-# TAB 4: FUHRPARK & EINSTELLUNGEN (NEU!)
-# ------------------------------------------
-with tab_fuhrpark:
-    st.subheader("Allgemeine Kapazitäten")
-    c_set1, c_set2 = st.columns(2)
-    new_shift = c_set1.number_input("Max. Schichtzeit (Std./Tag)", step=0.5, value=st.session_state.shift_hours)
-    new_cap = c_set2.number_input("Kapazität Sattelzug (m³)", step=1, value=st.session_state.truck_cap)
-    if new_shift != st.session_state.shift_hours or new_cap != st.session_state.truck_cap:
-        st.session_state.shift_hours = new_shift
-        st.session_state.truck_cap = new_cap
-        save_persistent_data()
-        
-    st.divider()
-    st.subheader("Fahrzeug-Verfügbarkeit (Kalender)")
-    st.caption("Änderungen hier werden sofort für den jeweiligen Tag übernommen.")
-    
-    # Baue eine Matrix für die Anzeige (2 Wochen ab dem gewählten Datum)
-    truck_db = st.session_state.truck_status_db
-    status_rows = []
-    for i in range(-5, 15):
-        d = start_of_week + timedelta(days=i)
-        if d.weekday() < 5: # Nur Werktage
-            d_str = d.strftime("%Y-%m-%d")
-            row = {"Datum": d_str, "Wochentag": WEEKDAYS_GERMAN[d.weekday()]}
-            for t in TRUCK_PRIO:
-                row[t] = truck_db.get(d_str, {}).get(t, STATUS_VERFUEGBAR)
-            status_rows.append(row)
-            
-    df_truck_status = pd.DataFrame(status_rows)
-    
-    edited_trucks = st.data_editor(
-        df_truck_status,
-        use_container_width=True,
-        hide_index=True,
-        disabled=["Datum", "Wochentag"],
-        column_config={
-            "Datum": st.column_config.TextColumn("Datum", width="small"),
-            "Wochentag": st.column_config.TextColumn("Tag", width="small"),
-            **{t: st.column_config.SelectboxColumn(t, options=TRUCK_STATUS_OPTIONS, width="medium") for t in TRUCK_PRIO}
-        }
-    )
-    
-    # Speichere geänderte Status in die Session State
-    trucks_changed = False
-    for _, row in edited_trucks.iterrows():
-        d_str = row["Datum"]
-        if d_str not in truck_db: truck_db[d_str] = {}
-        for t in TRUCK_PRIO:
-            if truck_db[d_str].get(t) != row[t]:
-                truck_db[d_str][t] = row[t]
-                trucks_changed = True
-                
-    if trucks_changed:
-        st.session_state.truck_status_db = truck_db
-        save_persistent_data()
-
 
 # ------------------------------------------
-# TAB 1: DAS TAGESGESCHÄFT (DISPO)
+# TAB 1: DAS TAGESGESCHÄFT (DISPOKALENDER)
 # ------------------------------------------
 with tab_dispo:
-    # 1. PLANUNGS-ALGORITHMUS INKL. SCORE-BERECHNUNG
     bunker_levels = {
         "1 - Sägemehl": st.session_state.bunker_sm,
         "2 - Hackschnitzel": st.session_state.bunker_hs,
@@ -271,17 +234,14 @@ with tab_dispo:
         "4 - Kappholz": st.session_state.bunker_kp,
     }
 
-    # Rest-Kontingente berechnen (Gebuchte Touren abziehen)
     remaining_quotas = {}
     for k, v in st.session_state.quotas_state.items():
         already_booked = sum(1 for b in st.session_state.booked_trips if b.get("Kunde") == k[0] and b.get("Produkt") == k[1])
         remaining_quotas[k] = max(0, v.get("soll", 0) - already_booked)
 
-    # Leere Kalender-Strukturen für die ausgewählte Woche erstellen
     schedule_by_day = {d.strftime("%Y-%m-%d"): {t: [] for t in TRUCK_PRIO} for d in week_dates}
     truck_used_hours = {d.strftime("%Y-%m-%d"): {t: 0.0 for t in TRUCK_PRIO} for d in week_dates}
 
-    # Bisherige gebuchte Touren eintragen
     for b in st.session_state.booked_trips:
         b_date = b.get("Datum")
         b_truck = b.get("Fahrzeug")
@@ -290,18 +250,13 @@ with tab_dispo:
             schedule_by_day[b_date][b_truck].append(b)
             truck_used_hours[b_date][b_truck] += b.get("dauer_h", 2.0)
 
-    edited_cust_db = st.session_state.customer_db
-    cust_duration_map = {str(r["Kunde"]).strip(): parse_time_str(r["Umlaufzeit (hh:mm)"]) for _, r in edited_cust_db.iterrows() if str(r["Kunde"]).strip()}
-
-    # Algorithmus Lauf (Nur für heute und die Zukunft!)
+    # Algorithmus Lauf
     for d_obj in week_dates:
         d_str = d_obj.strftime("%Y-%m-%d")
         
-        # FIXIERUNG: Wenn das Datum in der Vergangenheit liegt, plant der Algorithmus hier nichts Neues!
         if d_obj < today:
             continue
             
-        # Status der LKW für diesen Tag abrufen
         active_trucks = []
         extra_d_list = []
         for t in TRUCK_PRIO:
@@ -312,11 +267,11 @@ with tab_dispo:
                 extra_d_list.append(t)
                 
         truck_max_hours = {t: st.session_state.shift_hours + (4.0 if t in extra_d_list else 0.0) for t in active_trucks}
+        blocked_customers_today = st.session_state.get("blocked_customers", {}).get(d_str, [])
 
-        # Kandidaten bewerten
         candidates = []
         for (c_name, p_name), rem_qty in remaining_quotas.items():
-            if rem_qty <= 0: continue
+            if rem_qty <= 0 or c_name in blocked_customers_today: continue
             if bunker_levels.get(p_name, 50) <= 10: continue
                 
             dur = cust_duration_map.get(c_name, 2.0)
@@ -331,7 +286,6 @@ with tab_dispo:
             
         candidates.sort(key=lambda x: x["score"], reverse=True)
 
-        # Kandidaten verteilen
         for cand in candidates:
             c_key = (cand["Kunde"], cand["Produkt"])
             while remaining_quotas[c_key] > 0:
@@ -351,7 +305,7 @@ with tab_dispo:
                         break
                 if not assigned: break
 
-    # 2. KALENDER RENDERN
+    # KALENDER RENDERN
     cal_cols = st.columns(5)
     for idx, d_obj in enumerate(week_dates):
         d_str = d_obj.strftime("%Y-%m-%d")
@@ -359,7 +313,6 @@ with tab_dispo:
         is_past = d_obj < today
         
         with cal_cols[idx]:
-            # Optische Markierung für vergangene Tage
             header_color = "#e0e0e0" if is_past else "#f0f2f6"
             st.markdown(f"<div class='cal-day-header' style='background-color:{header_color}'>{w_day}, {d_obj.strftime('%d.%m.')}</div>", unsafe_allow_html=True)
             
@@ -386,7 +339,6 @@ with tab_dispo:
                             <span style="color:#444;">📦 {trip['Produkt'].split(' - ')[1] if ' - ' in trip['Produkt'] else trip['Produkt']}</span>
                         </div>""", unsafe_allow_html=True)
                         
-                        # Button zum Fixieren (nur wenn es in der Zukunft/Heute liegt und nicht schon fixiert ist)
                         if not is_man and not is_past:
                             if st.button(f"📌 Fixieren", key=f"btn_book_{d_str}_{t}_{trip['id']}"):
                                 trip["is_manual"] = True
@@ -394,60 +346,67 @@ with tab_dispo:
                                 save_persistent_data()
                                 st.rerun()
 
-# ------------------------------------------
-# TAB 2: MANUELLE BUCHUNGEN
-# ------------------------------------------
-with tab_manuell:
-    st.markdown("### 🛠️ Manuelle Verbuchung (Eigenfuhrpark)")
-    m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
-    
-    # Sicherstellen, dass Kunden zur Auswahl stehen
-    cust_keys = list(cust_duration_map.keys()) if 'cust_duration_map' in locals() and cust_duration_map else ["-"]
-    
-    m_kunde_raw = m_col1.selectbox("Kunde", cust_keys, key="m_kunde_sel")
-    m_prod = m_col2.selectbox("Produkt", PRODUCT_LIST, key="m_prod_sel")
-    m_date = m_col3.date_input("Datum", value=selected_date, key="m_date_sel")
-    m_truck = m_col4.selectbox("Fahrzeug", TRUCK_PRIO, key="m_truck_sel")
-    m_dauer = cust_duration_map.get(m_kunde_raw, 2.0) if 'cust_duration_map' in locals() else 2.0
-    
-    if m_col5.button("⚡ Verbuchen", use_container_width=True, type="primary") and m_kunde_raw != "-":
-        d_str_manual = m_date.strftime("%Y-%m-%d")
-        m_id = f"manual_{d_str_manual}_{m_truck}_{m_kunde_raw}_{m_prod}_{len(st.session_state.booked_trips)}"
-        st.session_state.booked_trips.append({
-            "id": m_id, "Datum": d_str_manual, "Fahrzeug": m_truck, "Zeitfenster": "Manuell",
-            "Kunde": m_kunde_raw, "Produkt": m_prod, "Menge_m3": st.session_state.truck_cap, "dauer_h": m_dauer,
-            "score": 99, "is_manual": True
-        })
-        save_persistent_data()
-        st.success("Tour manuell verbucht!")
-        st.rerun()
 
 # ------------------------------------------
-# TAB 3: STAMMDATEN & KONTINGENTE
+# TAB 2: FUHRPARKEINSTELLUNGEN
 # ------------------------------------------
-with tab_stammdaten:
-    st.markdown("### 👥 Kundendatenbank (Stammdaten)")
-    edited_cust_db_input = st.data_editor(
-        st.session_state.customer_db,
-        num_rows="dynamic",
-        use_container_width=True,
-        column_config={
-            "Kunde": st.column_config.TextColumn("Kundenname", required=True),
-            "Umlaufzeit (hh:mm)": st.column_config.TextColumn("Umlaufzeit (hh:mm)", default="02:00", required=True),
-            "1 - Sägemehl": st.column_config.CheckboxColumn("1 - Sägemehl", default=False),
-            "2 - Hackschnitzel": st.column_config.CheckboxColumn("2 - Hackschnitzel", default=False),
-            "3 - Rinde": st.column_config.CheckboxColumn("3 - Rinde", default=False),
-            "4 - Kappholz": st.column_config.CheckboxColumn("4 - Kappholz", default=False),
-        },
-        hide_index=True,
-        key="customer_editor"
-    )
-    if not edited_cust_db_input.equals(st.session_state.customer_db):
-        st.session_state.customer_db = edited_cust_db_input
+with tab_fuhrpark:
+    st.subheader("Allgemeine Kapazitäten")
+    c_set1, c_set2 = st.columns(2)
+    new_shift = c_set1.number_input("Max. Schichtzeit (Std./Tag)", step=0.5, value=st.session_state.shift_hours)
+    new_cap = c_set2.number_input("Kapazität Sattelzug (m³)", step=1, value=st.session_state.truck_cap)
+    if new_shift != st.session_state.shift_hours or new_cap != st.session_state.truck_cap:
+        st.session_state.shift_hours = new_shift
+        st.session_state.truck_cap = new_cap
         save_persistent_data()
-
+        
     st.divider()
+    st.subheader("Fahrzeug-Verfügbarkeit (Kalender)")
+    st.caption("Änderungen hier werden sofort für den jeweiligen Tag übernommen.")
+    
+    truck_db = st.session_state.truck_status_db
+    status_rows = []
+    for i in range(-5, 15):
+        d = start_of_week + timedelta(days=i)
+        if d.weekday() < 5:
+            d_str = d.strftime("%Y-%m-%d")
+            row = {"Datum": d_str, "Wochentag": WEEKDAYS_GERMAN[d.weekday()]}
+            for t in TRUCK_PRIO:
+                row[t] = truck_db.get(d_str, {}).get(t, STATUS_VERFUEGBAR)
+            status_rows.append(row)
+            
+    df_truck_status = pd.DataFrame(status_rows)
+    
+    edited_trucks = st.data_editor(
+        df_truck_status,
+        use_container_width=True,
+        hide_index=True,
+        disabled=["Datum", "Wochentag"],
+        column_config={
+            "Datum": st.column_config.TextColumn("Datum", width="small"),
+            "Wochentag": st.column_config.TextColumn("Tag", width="small"),
+            **{t: st.column_config.SelectboxColumn(t, options=TRUCK_STATUS_OPTIONS, width="medium") for t in TRUCK_PRIO}
+        }
+    )
+    
+    trucks_changed = False
+    for _, row in edited_trucks.iterrows():
+        d_str = row["Datum"]
+        if d_str not in truck_db: truck_db[d_str] = {}
+        for t in TRUCK_PRIO:
+            if truck_db[d_str].get(t) != row[t]:
+                truck_db[d_str][t] = row[t]
+                trucks_changed = True
+                
+    if trucks_changed:
+        st.session_state.truck_status_db = truck_db
+        save_persistent_data()
 
+
+# ------------------------------------------
+# TAB 3: KONTINGENTE
+# ------------------------------------------
+with tab_kontingente:
     st.markdown("### 📋 Wochen-Kontingente (Eigenfuhrpark)")
     booked_counts_by_cust_prod = {}
     for b in st.session_state.booked_trips:
@@ -509,13 +468,143 @@ with tab_stammdaten:
     if quotas_changed:
         save_persistent_data()
 
+    st.divider()
+    
+    st.markdown("#### 🚫 Kundensperren / Annahmestopp")
+    st.caption("Verhindert, dass der Algorithmus an einem spezifischen Tag automatische Touren zu diesen Kunden plant.")
+    
+    c_block1, c_block2 = st.columns([1, 2])
+    block_date = c_block1.date_input("Datum für Sperre auswählen:", value=selected_date, key="block_date_input")
+    block_date_str = block_date.strftime("%Y-%m-%d")
+
+    current_blocked = st.session_state.get("blocked_customers", {}).get(block_date_str, [])
+    valid_blocked = [c for c in current_blocked if c in all_customer_names]
+
+    selected_blocked_custs_ui = c_block2.multiselect(
+        f"Gesperrte Kunden am {block_date.strftime('%d.%m.%Y')}:",
+        options=all_customer_names,
+        default=valid_blocked,
+        key=f"block_cust_ui_{block_date_str}"
+    )
+
+    blocked_dict = st.session_state.get("blocked_customers", {})
+    if set(blocked_dict.get(block_date_str, [])) != set(selected_blocked_custs_ui):
+        blocked_dict[block_date_str] = selected_blocked_custs_ui
+        st.session_state["blocked_customers"] = blocked_dict
+        save_persistent_data()
+
+
 # ------------------------------------------
-# TAB 5: HISTORIE
+# TAB 4: ABHOLUNGEN
 # ------------------------------------------
-with tab_historie:
+with tab_abholungen:
+    st.markdown("### 🚛 Fremdspeditionen (Abholungen)")
+    ext_df_display = st.session_state.ext_terminal_db.reindex(columns=EXT_COL_ORDER)
+
+    edited_ext_db = st.data_editor(
+        ext_df_display,
+        use_container_width=True,
+        num_rows="dynamic",
+        column_config={
+            "Produkt / Artikel": st.column_config.SelectboxColumn("Produkt", options=PRODUCT_LIST, default="1 - Sägemehl"),
+            "Kunde": st.column_config.TextColumn("Kunde (Freitext)", default="", required=True),
+            "Frachtführer / Spedition": st.column_config.TextColumn("Spedition", default="", required=True),
+            "SOLL (Fuhren)": st.column_config.NumberColumn("SOLL", min_value=0, max_value=100, step=1, default=0),
+            "IST (Erfüllt)": st.column_config.NumberColumn("IST", min_value=0, max_value=100, step=1, default=0),
+            "Einsatztag": st.column_config.SelectboxColumn("Tag", options=[""] + WEEKDAYS_GERMAN[:5], default=""),
+        },
+        hide_index=True,
+        key="ext_terminal_editor_manual"
+    )
+
+    if not edited_ext_db.equals(st.session_state.ext_terminal_db):
+        st.session_state.ext_terminal_db = edited_ext_db
+        save_persistent_data()
+
+    if not edited_ext_db.empty:
+        col_sel, col_btn_ext = st.columns([3, 1])
+        ext_options = []
+        for idx, row in edited_ext_db.iterrows():
+            prod = str(row.get("Produkt / Artikel", ""))
+            cust = str(row.get("Kunde", "")).strip() or "Unbekannt"
+            sped = str(row.get("Frachtführer / Spedition", "")).strip() or "Unbekannt"
+            ext_options.append(f"Zeile {idx+1}: {prod} ➔ {cust} ({sped}) | IST: {row.get('IST (Erfüllt)', 0)}/{row.get('SOLL (Fuhren)', 0)}")
+        
+        selected_ext_idx_str = col_sel.selectbox("Tour zum Verbuchen auswählen:", options=ext_options, key="ext_book_select")
+        
+        if col_btn_ext.button("📌 +1 Verbuchen", use_container_width=True, type="primary"):
+            row_idx = ext_options.index(selected_ext_idx_str)
+            st.session_state.ext_terminal_db.at[row_idx, "IST (Erfüllt)"] += 1
+            
+            booked_row = st.session_state.ext_terminal_db.iloc[row_idx]
+            st.session_state.ext_booked_trips.append({
+                "Zeitpunkt": datetime.now().strftime("%d.%m.%Y %H:%M"),
+                "Produkt": booked_row.get("Produkt / Artikel"),
+                "Kunde": booked_row.get("Kunde"),
+                "Spedition": booked_row.get("Frachtführer / Spedition"),
+                "Einsatztag": booked_row.get("Einsatztag") or "Keiner"
+            })
+            save_persistent_data()
+            st.success("Fremdfuhre verbucht!")
+            st.rerun()
+
+    st.divider()
+
+    st.markdown("### 🛠️ Manuelle Verbuchung (Eigenfuhrpark)")
+    m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
+    
+    cust_keys = list(cust_duration_map.keys()) if 'cust_duration_map' in locals() and cust_duration_map else ["-"]
+    
+    m_kunde_raw = m_col1.selectbox("Kunde", cust_keys, key="m_kunde_sel")
+    m_prod = m_col2.selectbox("Produkt", PRODUCT_LIST, key="m_prod_sel")
+    m_date = m_col3.date_input("Datum", value=selected_date, key="m_date_sel")
+    m_truck = m_col4.selectbox("Fahrzeug", TRUCK_PRIO, key="m_truck_sel")
+    m_dauer = cust_duration_map.get(m_kunde_raw, 2.0) if 'cust_duration_map' in locals() else 2.0
+    
+    if m_col5.button("⚡ Verbuchen", use_container_width=True, type="primary") and m_kunde_raw != "-":
+        d_str_manual = m_date.strftime("%Y-%m-%d")
+        m_id = f"manual_{d_str_manual}_{m_truck}_{m_kunde_raw}_{m_prod}_{len(st.session_state.booked_trips)}"
+        st.session_state.booked_trips.append({
+            "id": m_id, "Datum": d_str_manual, "Fahrzeug": m_truck, "Zeitfenster": "Manuell",
+            "Kunde": m_kunde_raw, "Produkt": m_prod, "Menge_m3": st.session_state.truck_cap, "dauer_h": m_dauer,
+            "score": 99, "is_manual": True
+        })
+        save_persistent_data()
+        st.success("Tour manuell verbucht!")
+        st.rerun()
+
+
+# ------------------------------------------
+# TAB 5: KUNDENDATENBANK
+# ------------------------------------------
+with tab_kunden:
+    st.markdown("### 👥 Kundendatenbank (Stammdaten)")
+    edited_cust_db_input = st.data_editor(
+        st.session_state.customer_db,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Kunde": st.column_config.TextColumn("Kundenname", required=True),
+            "Umlaufzeit (hh:mm)": st.column_config.TextColumn("Umlaufzeit (hh:mm)", default="02:00", required=True),
+            "1 - Sägemehl": st.column_config.CheckboxColumn("1 - Sägemehl", default=False),
+            "2 - Hackschnitzel": st.column_config.CheckboxColumn("2 - Hackschnitzel", default=False),
+            "3 - Rinde": st.column_config.CheckboxColumn("3 - Rinde", default=False),
+            "4 - Kappholz": st.column_config.CheckboxColumn("4 - Kappholz", default=False),
+        },
+        hide_index=True,
+        key="customer_editor"
+    )
+    if not edited_cust_db_input.equals(st.session_state.customer_db):
+        st.session_state.customer_db = edited_cust_db_input
+        save_persistent_data()
+
+
+# ------------------------------------------
+# TAB 6: LOGBUCH
+# ------------------------------------------
+with tab_logbuch:
     st.markdown("### Historie des Eigenfuhrparks")
     if st.session_state.booked_trips:
-        # Sortiere nach Datum (neuste zuerst)
         df_booked = pd.DataFrame(st.session_state.booked_trips)
         df_booked = df_booked.sort_values(by="Datum", ascending=False)
         st.dataframe(df_booked, use_container_width=True, hide_index=True)
@@ -528,3 +617,7 @@ with tab_historie:
             st.session_state.booked_trips = [b for b in st.session_state.booked_trips if b.get("id") != selected_del_id]
             save_persistent_data()
             st.rerun()
+
+    st.markdown("### Historie der Fremdfuhren")
+    if st.session_state.ext_booked_trips:
+        st.dataframe(pd.DataFrame(st.session_state.ext_booked_trips), use_container_width=True, hide_index=True)

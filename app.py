@@ -4,8 +4,6 @@ import os
 from datetime import datetime, timedelta, date
 
 from streamlit_autorefresh import st_autorefresh
-import streamlit_vertical_slider as svs
-
 import database as db
 
 # ==========================================
@@ -74,14 +72,13 @@ def sync_from_db():
         # 1. Bunker (mit Versions-Kontrolle für die UI)
         b_saved = saved.get("bunkers", {})
         for k in ["bunker_sm", "bunker_hs", "bunker_ri", "bunker_kp"]:
-            remote_val = b_saved.get(k)
-            if remote_val is not None:
-                local_val = st.session_state.get(k, 50)
-                if remote_val != local_val:
-                    st.session_state[k] = remote_val
-                    # Erhöht die Version -> UI zeichnet den Regler neu
-                    v_key = f"{k}_version"
-                    st.session_state[v_key] = st.session_state.get(v_key, 0) + 1
+            remote_val = b_saved.get(k, 50)
+            local_val = st.session_state.get(k, 50)
+            if int(remote_val) != int(local_val):
+                st.session_state[k] = int(remote_val)
+                # Erhöht die Version -> UI zeichnet den Regler neu
+                v_key = f"{k}_version"
+                st.session_state[v_key] = st.session_state.get(v_key, 0) + 1
                     
         # 2. Allgemeine Einstellungen
         for k in ["shift_hours", "truck_cap"]:
@@ -183,7 +180,7 @@ cust_duration_map = {str(r["Kunde"]).strip(): parse_time_str(r["Umlaufzeit (hh:m
 all_customer_names = [str(r["Kunde"]).strip() for _, r in edited_cust_db.iterrows() if str(r["Kunde"]).strip()]
 
 # ==========================================
-# BUNKER-FÜLLSTÄNDE (FEHLERBEHOBEN FÜR DIE '0')
+# BUNKER-FÜLLSTÄNDE (JETZT MIT NATIVEM SLIDER)
 # ==========================================
 st.subheader("🏭 Aktuelle Bunker-Füllstände (%)")
 col1, col2, col3, col4 = st.columns(4)
@@ -194,23 +191,22 @@ def render_bunker(col, title, db_key):
         
         v_key = f"{db_key}_version"
         current_val = int(st.session_state.get(db_key, 50))
-        
-        # Der Slider-Key ändert sich nur, wenn von extern eine Änderung kam
         slider_key = f"slider_{db_key}_{st.session_state.get(v_key, 0)}"
         
-        val = svs.vertical_slider(
-            key=slider_key,
-            default_value=current_val,
-            step=10,
+        # Stabiler nativer Streamlit Slider
+        val = st.slider(
+            label=title,
             min_value=0,
             max_value=100,
-            slider_color="#2e7d32",
-            track_color="#dcdcdc"
+            value=current_val,
+            step=10,
+            key=slider_key,
+            label_visibility="collapsed"
         )
         
-        # Hat der Nutzer den Slider hier an diesem PC bewegt? (Berücksichtigt auch die 0!)
-        if val is not None and int(val) != current_val:
-            st.session_state[db_key] = int(val)
+        # Wenn der Nutzer den Regler verstellt hat
+        if val != current_val:
+            st.session_state[db_key] = val
             save_persistent_data()
             st.rerun()
             

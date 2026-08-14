@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, date
 
 from streamlit_autorefresh import st_autorefresh
 import database as db
-import logistics  # <-- NEU: Unser ausgelagerter Algorithmus!
+import logistics
 
 # ==========================================
 # PAGE CONFIG & PFADE
@@ -70,24 +70,20 @@ def sync_from_db():
         saved = load_persistent_data()
         if not saved: return
         
-        # 1. Bunker (mit Versions-Kontrolle für die UI)
         b_saved = saved.get("bunkers", {})
         for k in ["bunker_sm", "bunker_hs", "bunker_ri", "bunker_kp"]:
             remote_val = b_saved.get(k, 50)
             local_val = st.session_state.get(k, 50)
             if int(remote_val) != int(local_val):
                 st.session_state[k] = int(remote_val)
-                # Erhöht die Version -> UI zeichnet den Regler neu
                 v_key = f"{k}_version"
                 st.session_state[v_key] = st.session_state.get(v_key, 0) + 1
                     
-        # 2. Allgemeine Einstellungen
         for k in ["shift_hours", "truck_cap"]:
             r_val = saved.get(k)
             if r_val is not None and st.session_state.get(k) != r_val:
                 st.session_state[k] = r_val
                 
-        # 3. Dataframes & komplexe Strukturen (mit Versions-Kontrolle)
         new_trucks = saved.get("truck_status_db", {})
         if st.session_state.get("truck_status_db", {}) != new_trucks:
             st.session_state["truck_status_db"] = new_trucks
@@ -108,7 +104,6 @@ def sync_from_db():
             st.session_state["quotas_state"] = new_quotas
             st.session_state["quotas_version"] = st.session_state.get("quotas_version", 0) + 1
 
-        # 4. Listen
         st.session_state["booked_trips"] = saved.get("booked_trips", [])
         st.session_state["ext_booked_trips"] = saved.get("ext_booked_trips", [])
         st.session_state["blocked_customers"] = saved.get("blocked_customers", {})
@@ -120,12 +115,6 @@ def parse_time_str(t_str):
     except Exception:
         return 2.0
 
-def format_hours(hours_float):
-    hrs = int(hours_float)
-    mins = int(round((hours_float - hrs) * 60))
-    if mins == 60: hrs, mins = hrs + 1, 0
-    return f"{hrs:02d}:{mins:02d}"
-
 # ==========================================
 # INITIALISIERUNG
 # ==========================================
@@ -134,7 +123,6 @@ if "edit_mode" not in st.session_state:
 
 sync_from_db()
 
-# Fallback für leere Datenbanken
 if "customer_db" not in st.session_state or st.session_state["customer_db"].empty:
     st.session_state["customer_db"] = pd.DataFrame([
         {"Kunde": "SIAT Urmatt", "Umlaufzeit (hh:mm)": "03:55", "1 - Sägemehl": True, "2 - Hackschnitzel": True, "3 - Rinde": False, "4 - Kappholz": False}
@@ -181,7 +169,7 @@ cust_duration_map = {str(r["Kunde"]).strip(): parse_time_str(r["Umlaufzeit (hh:m
 all_customer_names = [str(r["Kunde"]).strip() for _, r in edited_cust_db.iterrows() if str(r["Kunde"]).strip()]
 
 # ==========================================
-# BUNKER-FÜLLSTÄNDE (JETZT MIT NATIVEM SLIDER)
+# BUNKER-FÜLLSTÄNDE
 # ==========================================
 st.subheader("🏭 Aktuelle Bunker-Füllstände (%)")
 col1, col2, col3, col4 = st.columns(4)
@@ -194,7 +182,6 @@ def render_bunker(col, title, db_key):
         current_val = int(st.session_state.get(db_key, 50))
         slider_key = f"slider_{db_key}_{st.session_state.get(v_key, 0)}"
         
-        # Stabiler nativer Streamlit Slider
         val = st.slider(
             label=title,
             min_value=0,
@@ -205,7 +192,6 @@ def render_bunker(col, title, db_key):
             label_visibility="collapsed"
         )
         
-        # Wenn der Nutzer den Regler verstellt hat
         if val != current_val:
             st.session_state[db_key] = val
             save_persistent_data()
@@ -213,7 +199,6 @@ def render_bunker(col, title, db_key):
             
         display_val = int(st.session_state.get(db_key, 50))
         
-        # Exakte Schwellenwerte
         if display_val <= 19: 
             st.warning("⛔ GESPERRT")
         elif display_val >= 80: 
@@ -241,7 +226,7 @@ tab_dispo, tab_fuhrpark, tab_kontingente, tab_abholungen, tab_kunden, tab_logbuc
 ])
 
 # ------------------------------------------
-# TAB 1: DISPOKALENDER (inkl. Manueller Buchung)
+# TAB 1: DISPOKALENDER
 # ------------------------------------------
 with tab_dispo:
     st.markdown("### 🛠️ Manuelle Verbuchung (Eigenfuhrpark)")
@@ -284,8 +269,14 @@ with tab_dispo:
 
     schedule_by_day = {d.strftime("%Y-%m-%d"): {t: [] for t in TRUCK_PRIO} for d in week_dates}
     truck_used_hours = {d.strftime("%Y-%m-%d"): {t: 0.0 for t in TRUCK_PRIO} for d in week_dates}
+    truck_tour_counts = {d.strftime("%Y-%m-%d"): {t: 0 for t in TRUCK_PRIO} for d in week_dates}
 
-    # 1. Fixierte & Manuelle Touren zuerst in den Kalender eintragen
+    # Den zuletzt gebuchten Eintrag (für den Start-Wechsel-Bonus) auslesen
+    last_prod_tracker = None
+    if st.session_state.booked_trips:
+        last_prod_tracker = st.session_state.booked_trips[-1].get("Produkt")
+
+    # 1. Fixierte & Manuelle Touren einlesen
     for b in st.session_state.booked_trips:
         b_date = b.get("Datum")
         b_truck = b.get("Fahrzeug")
@@ -293,8 +284,9 @@ with tab_dispo:
             if "score" not in b: b["score"] = 99
             schedule_by_day[b_date][b_truck].append(b)
             truck_used_hours[b_date][b_truck] += b.get("dauer_h", 2.0)
+            truck_tour_counts[b_date][b_truck] += 1
 
-    # 2. Den Rest durch die externe logistics.py auffüllen lassen
+    # 2. Durch logistics.py berechnen lassen
     for d_obj in week_dates:
         d_str = d_obj.strftime("%Y-%m-%d")
         if d_obj < today: continue
@@ -324,7 +316,6 @@ with tab_dispo:
                     "bemerkung": q_info.get("rest", "Keine")
                 })
 
-        # --- AUFRUF DER EXTERNEN LOGIK ---
         berechnete_touren = logistics.calculate_tours(
             datum=d_str,
             offene_kontingente=offene_kontingente,
@@ -333,10 +324,11 @@ with tab_dispo:
             bunker_levels=bunker_levels,
             shift_hours=st.session_state.shift_hours,
             truck_cap=st.session_state.truck_cap,
-            initial_used_hours=truck_used_hours[d_str] # Hier übergeben wir die manuell verbrauchte Zeit!
+            initial_used_hours=truck_used_hours[d_str],
+            initial_tour_counts=truck_tour_counts[d_str],
+            last_booked_product=last_prod_tracker
         )
 
-        # Die berechneten Touren nahtlos in den UI-Kalender einsortieren
         for trip in berechnete_touren:
             t = trip["Fahrzeug"]
             trip["id"] = f"auto_{d_str}_{t}_{len(schedule_by_day[d_str][t])}"
@@ -344,6 +336,7 @@ with tab_dispo:
             schedule_by_day[d_str][t].append(trip)
             truck_used_hours[d_str][t] += trip["dauer_h"]
             remaining_quotas[(trip["Kunde"], trip["Produkt"])] -= 1
+            last_prod_tracker = trip["Produkt"] # Tracker updaten für den nächsten Tag!
 
     # 3. Kalender rendern
     cal_cols = st.columns(5)
@@ -363,7 +356,7 @@ with tab_dispo:
                     st.markdown(f"**🚛 {t}** <span style='color:red;'>❌ Ausfall</span>", unsafe_allow_html=True)
                 else:
                     badge = "🟢" if status == STATUS_AUSHILFE else "✅"
-                    st.markdown(f"**🚛 {t}** {badge} <small>({format_hours(truck_used_hours[d_str][t])}h)</small>", unsafe_allow_html=True)
+                    st.markdown(f"**🚛 {t}** {badge} <small>({truck_used_hours[d_str][t]:.1f}h)</small>", unsafe_allow_html=True)
                     
                     for trip in schedule_by_day[d_str][t]:
                         is_man = trip.get("is_manual", False)
@@ -373,15 +366,19 @@ with tab_dispo:
                         else:
                             card_class, tag_type = ("cal-card-manual", "🛠️") if is_man else ("cal-card", "🤖")
                             
+                        # UI Update: Zeigt nun "Tour 1" oder "Manuell" statt der Uhrzeit an!
                         st.markdown(f"""
                         <div class="{card_class}">
-                            <strong>{tag_type} {trip.get('Zeitfenster', '').split(' ')[0]}</strong> | <b>{trip['Kunde']}</b><br>
+                            <strong>{tag_type} {trip.get('Zeitfenster', '')}</strong> | <b>{trip['Kunde']}</b><br>
                             <span style="color:#444;">📦 {trip['Produkt'].split(' - ')[1] if ' - ' in trip['Produkt'] else trip['Produkt']}</span>
                         </div>""", unsafe_allow_html=True)
                         
                         if not is_man and not is_past:
                             if st.button(f"📌 Fixieren", key=f"btn_book_{d_str}_{t}_{trip['id']}"):
                                 trip["is_manual"] = True
+                                # Damit nach dem manuellen Fixieren die Tournummern nicht zu "Manuell" wechseln
+                                if trip.get('Zeitfenster') == "Manuell":
+                                    trip['Zeitfenster'] = f"Tour {truck_tour_counts[d_str][t] + 1} (Fix)"
                                 st.session_state.booked_trips.append(trip)
                                 save_persistent_data()
                                 st.rerun()

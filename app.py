@@ -141,7 +141,6 @@ with col_status:
     else:
         st.success("✅ Autorefresh aktiv (5s)")
         refresh_data_from_db()
-        # Auf 5.000 Millisekunden (5 Sekunden) gesetzt
         st_autorefresh(interval=5000, limit=None, key="data_refresh")
 
 # ==========================================
@@ -157,13 +156,35 @@ col1, col2, col3, col4 = st.columns(4)
 def render_bunker(col, title, key, default):
     with col:
         st.markdown(f"<div style='text-align: center;'><strong>{title}</strong></div>", unsafe_allow_html=True)
-        val = svs.vertical_slider(key=f"vs_{key}", default_value=st.session_state.get(key, default), step=10, min_value=0, max_value=100, slider_color="#2e7d32", track_color="#dcdcdc")
-        if val is not None and val != st.session_state[key]:
+        
+        # Sicherstellen, dass der Key im Session State existiert
+        if key not in st.session_state:
+            st.session_state[key] = default
+            
+        old_val = st.session_state[key]
+        
+        # Sauber an den State gekoppelter Regler (verhindert Einfrieren)
+        val = svs.vertical_slider(
+            key=key,
+            default_value=st.session_state[key],
+            step=10,
+            min_value=0,
+            max_value=100,
+            slider_color="#2e7d32",
+            track_color="#dcdcdc"
+        )
+        
+        if val is not None and val != old_val:
             st.session_state[key] = val
             save_persistent_data()
-        if st.session_state[key] <= 10: st.warning("⛔ GESPERRT")
-        elif st.session_state[key] >= 80: st.error("🚨 HOCH")
-        else: st.success("✅ Normal")
+            
+        current_val = st.session_state[key]
+        if current_val <= 10: 
+            st.warning("⛔ GESPERRT")
+        elif current_val >= 80: 
+            st.error("🚨 HOCH")
+        else: 
+            st.success("✅ Normal")
 
 render_bunker(col1, "1 - Sägemehl", "bunker_sm", 50)
 render_bunker(col2, "2 - Hackschnitzel", "bunker_hs", 50)

@@ -558,7 +558,12 @@ with tab_abholungen:
             "Frachtführer / Spedition": st.column_config.TextColumn("Spedition", default="", required=True),
             "SOLL (Fuhren)": st.column_config.NumberColumn("SOLL", min_value=0, max_value=100, step=1, default=0),
             "IST (Erfüllt)": st.column_config.NumberColumn("IST", min_value=0, max_value=100, step=1, default=0),
-            "Einsatztag": st.column_config.SelectboxColumn("Tag", options=[""] + WEEKDAYS_GERMAN[:5], default=""),
+            # Geändert auf TextColumn, um Mehrfachnennungen (z.B. "Montag, Mittwoch") zu erlauben:
+            "Einsatztag": st.column_config.TextColumn(
+                "Tag(e) (z.B. Montag, Dienstag)", 
+                default="", 
+                help="Mehrere Tage durch Komma getrennt eingeben"
+            ),
         },
         hide_index=True,
         key="ext_terminal_editor_manual"
@@ -575,7 +580,8 @@ with tab_abholungen:
             prod = str(row.get("Produkt / Artikel", ""))
             cust = str(row.get("Kunde", "")).strip() or "Unbekannt"
             sped = str(row.get("Frachtführer / Spedition", "")).strip() or "Unbekannt"
-            ext_options.append(f"Zeile {idx+1}: {prod} ➔ {cust} ({sped}) | IST: {row.get('IST (Erfüllt)', 0)}/{row.get('SOLL (Fuhren)', 0)}")
+            tag_val = str(row.get("Einsatztag", "")).strip() or "Kein Tag"
+            ext_options.append(f"Zeile {idx+1}: {prod} ➔ {cust} ({sped}) [{tag_val}] | IST: {row.get('IST (Erfüllt)', 0)}/{row.get('SOLL (Fuhren)', 0)}")
         
         selected_ext_idx_str = col_sel.selectbox("Tour zum Verbuchen auswählen:", options=ext_options, key="ext_book_select")
         
@@ -594,7 +600,6 @@ with tab_abholungen:
             save_persistent_data()
             st.success("Fremdfuhre verbucht!")
             st.rerun()
-
 
 # ------------------------------------------
 # TAB 5: KUNDENDATENBANK

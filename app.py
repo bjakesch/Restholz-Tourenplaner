@@ -145,31 +145,31 @@ def perform_global_reset():
 # ==========================================
 # HEADER, DATUM & AUTO-REFRESH LOGIK
 # ==========================================
-col_logo, col_head, col_date, col_status = st.columns([1.5, 4, 3, 3])
-
-with col_logo:
-    # Lade das exakte Kellerholz-Logo aus dem Main-Branch
-    if os.path.exists("KELLERHOLZ-CMYK.png"):
-        st.image("KELLERHOLZ-CMYK.png", use_container_width=True)
-    else:
-        # Fallback, falls das Bild beim Laden kurz verzögert
-        st.markdown("<h3 style='color:#1b5e20;'>🪵 KELLERHOLZ</h3>", unsafe_allow_html=True)
-
-with col_head:
-    st.title("Restholz-Tourenplaner")
+# Neue Reihenfolge: Datum (links), Status, Titel, Logo (rechts)
+col_date, col_status, col_head, col_logo = st.columns([3, 3, 4, 1.5])
 
 with col_date:
-    st.write("") 
+    st.write("") # Kleiner Platzhalter nach oben
     selected_date = st.date_input("📅 Planungswoche (beliebiger Tag)", value=datetime.today().date())
 
 with col_status:
-    st.write("") 
+    st.write("") # Kleiner Platzhalter nach oben
     edit_mode = st.toggle("✏️ Bearbeitungsmodus", value=False, help="Pausiert das Live-Laden für Eingaben.")
     if edit_mode:
         st.warning("⏸️ Auto-refresh inaktiv")
     else:
         st.success("✅ Autorefresh aktiv (30s)")
         st_autorefresh(interval=30000, limit=None, key="data_refresh")
+
+with col_head:
+    st.title("Restholz-Tourenplaner")
+
+with col_logo:
+    # Das korrekte Kellerholz-Logo aus dem Main-Branch
+    if os.path.exists("KELLERHOLZ-CMYK.png"):
+        st.image("KELLERHOLZ-CMYK.png", use_container_width=True)
+    else:
+        st.markdown("<h3 style='color:#1b5e20;'>🪵 KELLERHOLZ</h3>", unsafe_allow_html=True)
 
 # ==========================================
 # DATUMS-BERECHNUNG FÜR DIE WOCHE

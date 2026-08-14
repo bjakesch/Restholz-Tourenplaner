@@ -372,12 +372,7 @@ with tab_dispo:
                                 s_details = trip.get("score_details", "").replace("\n", "&#10;") # HTML-Zeilenumbruch
                                 score_html = f"<span title='{s_details}' style='float:right; background:#e8f5e9; color:#1b5e20; padding:1px 6px; border-radius:10px; font-size:0.75em; border:1px solid #c8e6c9; cursor:help;'>🎯 {trip.get('score')}</span>"
                                 
-                            st.markdown(f"""
-                            <div class="{card_class}">
-                                {score_html}
-                                <strong>{tag_type} {trip.get('Zeitfenster', '')}</strong> | <b>{trip['Kunde']}</b><br>
-                                <span style="color:#444;">📦 {trip['Produkt'].split(' - ')[1] if ' - ' in trip['Produkt'] else trip['Produkt']}</span>
-                            </div>""", unsafe_allow_html=True)
+                            st.markdown(f"<div class='{card_class}'>{score_html}<strong>{tag_type} {trip.get('Zeitfenster', '')}</strong> | <b>{trip['Kunde']}</b><br><span style='color:#444;'>📦 {trip['Produkt'].split(' - ')[1] if ' - ' in trip['Produkt'] else trip['Produkt']}</span></div>", unsafe_allow_html=True)
                             
                             if not is_man and not is_past:
                                 if st.button(f"📌 Fixieren", key=f"btn_book_{d_str}_{t}_{trip['id']}"):

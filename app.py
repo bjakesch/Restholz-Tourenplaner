@@ -41,7 +41,7 @@ STATUS_AUSHILFE = "🟢 Aushilfe (17-21)"
 TRUCK_STATUS_OPTIONS = [STATUS_VERFUEGBAR, STATUS_AUSFALL, STATUS_AUSHILFE]
 
 # ==========================================
-# DATEN-SYNCHRONISIERUNG (ECHTER ABGLEICH)
+# DATEN-SYNCHRONISIERUNG (ECHTER DEEP-SYNC)
 # ==========================================
 def load_persistent_data():
     return db.load_app_state()
@@ -67,37 +67,50 @@ def save_persistent_data():
     db.save_app_state(data)
 
 def sync_from_db():
-    # Nur synchronisieren, wenn der Bearbeitungsmodus AUS ist (schützt vor dem Überschreiben während eigener Eingaben)
+    # Nur synchronisieren, wenn NICHT im Bearbeitungsmodus (damit man beim Tippen nicht unterbrochen wird)
     if not st.session_state.get("edit_mode", False):
         saved = load_persistent_data()
         
+        # 1. Allgemeine Einstellungen
         st.session_state["shift_hours"] = float(saved.get("shift_hours", 9.0))
         st.session_state["truck_cap"] = int(saved.get("truck_cap", 103))
-        st.session_state["truck_status_db"] = saved.get("truck_status_db", {})
-        st.session_state["blocked_customers"] = saved.get("blocked_customers", {})
         
-        b = saved.get("bunkers", {})
-        st.session_state["bunker_sm"] = b.get("bunker_sm", 50)
-        st.session_state["bunker_hs"] = b.get("bunker_hs", 50)
-        st.session_state["bunker_ri"] = b.get("bunker_ri", 50)
-        st.session_state["bunker_kp"] = b.get("bunker_kp", 50)
-        
+        # 2. Gebuchte Touren und Sperren (Einfache Listen/Dicts)
         st.session_state["booked_trips"] = saved.get("booked_trips", [])
         st.session_state["ext_booked_trips"] = saved.get("ext_booked_trips", [])
+        st.session_state["blocked_customers"] = saved.get("blocked_customers", {})
         
-        # Dataframes abgleichen und ggf. alte Widget-Caches löschen, damit Neuladungen sofort greifen
-        remote_cust = pd.DataFrame(saved.get("customer_db", []))
-        if "customer_db" not in st.session_state or not remote_cust.equals(st.session_state["customer_db"]):
-            st.session_state["customer_db"] = remote_cust
-            if "customer_editor" in st.session_state: del st.session_state["customer_editor"]
-
-        remote_ext = pd.DataFrame(saved.get("ext_terminal_db", []))
-        if "ext_terminal_db" not in st.session_state or not remote_ext.equals(st.session_state["ext_terminal_db"]):
-            st.session_state["ext_terminal_db"] = remote_ext
-            if "ext_terminal_editor_manual" in st.session_state: del st.session_state["ext_terminal_editor_manual"]
+        # 3. Bunkerstände abgleichen & Regler-Cache zwingend überschreiben falls sich Werte extern geändert haben
+        b_saved = saved.get("bunkers", {})
+        for k, ui_key in [("bunker_sm", "vs_sm"), ("bunker_hs", "vs_hs"), ("bunker_ri", "vs_ri"), ("bunker_kp", "vs_kp")]:
+            new_val = b_saved.get(k, 50)
+            if st.session_state.get(k) != new_val:
+                st.session_state[k] = new_val
+                st.session_state[ui_key] = new_val # Zwingt den vertikalen Slider sich zu aktualisieren!
+                
+        # 4. Kundendatenbank (Dataframe Deep-Sync)
+        new_cust_df = pd.DataFrame(saved.get("customer_db", []))
+        if "customer_db" not in st.session_state or not new_cust_df.equals(st.session_state["customer_db"]):
+            st.session_state["customer_db"] = new_cust_df
+            if "customer_editor" in st.session_state: del st.session_state["customer_editor"] # Cache löschen
             
-        if "quotas_state" in saved:
-            st.session_state["quotas_state"] = {tuple(k.split("|||")): v for k, v in saved["quotas_state"].items()}
+        # 5. Fremdspeditionen Terminal (Dataframe Deep-Sync)
+        new_ext_df = pd.DataFrame(saved.get("ext_terminal_db", []))
+        if "ext_terminal_db" not in st.session_state or not new_ext_df.equals(st.session_state["ext_terminal_db"]):
+            st.session_state["ext_terminal_db"] = new_ext_df
+            if "ext_terminal_editor_manual" in st.session_state: del st.session_state["ext_terminal_editor_manual"] # Cache löschen
+            
+        # 6. Kontingente (Dict Deep-Sync)
+        new_quotas = {tuple(k.split("|||")): v for k, v in saved.get("quotas_state", {}).items()}
+        if st.session_state.get("quotas_state", {}) != new_quotas:
+            st.session_state["quotas_state"] = new_quotas
+            if "quotas_editor" in st.session_state: del st.session_state["quotas_editor"] # Cache löschen
+            
+        # 7. Fuhrpark Matrix (Dict Deep-Sync)
+        new_trucks = saved.get("truck_status_db", {})
+        if st.session_state.get("truck_status_db", {}) != new_trucks:
+            st.session_state["truck_status_db"] = new_trucks
+            if "truck_matrix_editor" in st.session_state: del st.session_state["truck_matrix_editor"] # Cache löschen
 
 def parse_time_str(t_str):
     try:
@@ -117,7 +130,7 @@ def format_hours(hours_float):
 # ==========================================
 if "edit_mode" not in st.session_state: st.session_state["edit_mode"] = False
 if "customer_db" not in st.session_state: st.session_state["customer_db"] = pd.DataFrame()
-sync_from_db()
+sync_from_db() # Einmal beim allerersten Laden der Seite ausführen
 
 # ==========================================
 # HEADER & REFRESH-STEUERUNG
@@ -145,7 +158,7 @@ with col_status:
         st.warning("⏸️ Auto-refresh inaktiv")
     else:
         st.success("✅ Autorefresh aktiv (5s)")
-        sync_from_db()
+        sync_from_db() # Vor jedem 5-Sekunden-Rerun frische Daten holen und ggf. Caches löschen
         st_autorefresh(interval=5000, limit=None, key="data_refresh")
 
 # ==========================================
@@ -160,23 +173,21 @@ cust_duration_map = {str(r["Kunde"]).strip(): parse_time_str(r["Umlaufzeit (hh:m
 all_customer_names = [str(r["Kunde"]).strip() for _, r in edited_cust_db.iterrows() if str(r["Kunde"]).strip()]
 
 # ==========================================
-# BUNKER-FÜLLSTÄNDE (VOLL SYNCHRONISIERT)
+# BUNKER-FÜLLSTÄNDE (ANGESPASSTE SCHWELLENWERTE)
 # ==========================================
 st.subheader("🏭 Aktuelle Bunker-Füllstände (%)")
 col1, col2, col3, col4 = st.columns(4)
 
-def render_bunker(col, title, key, default):
+def render_bunker(col, title, db_key, ui_key):
     with col:
         st.markdown(f"<div style='text-align: center;'><strong>{title}</strong></div>", unsafe_allow_html=True)
         
-        if key not in st.session_state:
-            st.session_state[key] = default
-            
-        old_val = st.session_state[key]
+        # Lokalen Stand des UI-Sliders holen
+        current_ui_val = st.session_state.get(ui_key, st.session_state.get(db_key, 50))
         
         val = svs.vertical_slider(
-            key=key,
-            default_value=st.session_state[key],
+            key=ui_key,
+            default_value=current_ui_val,
             step=10,
             min_value=0,
             max_value=100,
@@ -184,22 +195,26 @@ def render_bunker(col, title, key, default):
             track_color="#dcdcdc"
         )
         
-        if val is not None and val != old_val:
-            st.session_state[key] = val
+        # Hat der Nutzer den Slider in dieser Sekunde manuell verschoben?
+        if val is not None and val != st.session_state.get(db_key, 50):
+            st.session_state[db_key] = val
+            st.session_state[ui_key] = val
             save_persistent_data()
             
-        current_val = st.session_state[key]
-        if current_val <= 10: 
+        current_val = st.session_state[db_key]
+        
+        # Schwellenwerte: 0-19 gesperrt, 20-79 normal, >=80 hoch
+        if current_val <= 19: 
             st.warning("⛔ GESPERRT")
         elif current_val >= 80: 
             st.error("🚨 HOCH")
         else: 
             st.success("✅ Normal")
 
-render_bunker(col1, "1 - Sägemehl", "bunker_sm", 50)
-render_bunker(col2, "2 - Hackschnitzel", "bunker_hs", 50)
-render_bunker(col3, "3 - Rinde", "bunker_ri", 50)
-render_bunker(col4, "4 - Kappholz", "bunker_kp", 50)
+render_bunker(col1, "1 - Sägemehl", "bunker_sm", "vs_sm")
+render_bunker(col2, "2 - Hackschnitzel", "bunker_hs", "vs_hs")
+render_bunker(col3, "3 - Rinde", "bunker_ri", "vs_ri")
+render_bunker(col4, "4 - Kappholz", "bunker_kp", "vs_kp")
 
 st.divider()
 
@@ -287,7 +302,7 @@ with tab_dispo:
         candidates = []
         for (c_name, p_name), rem_qty in remaining_quotas.items():
             if rem_qty <= 0 or c_name in blocked_customers_today: continue
-            if bunker_levels.get(p_name, 50) <= 10: continue
+            if bunker_levels.get(p_name, 50) <= 19: continue
                 
             dur = cust_duration_map.get(c_name, 2.0)
             q_info = st.session_state.quotas_state.get((c_name, p_name), {})
@@ -403,7 +418,7 @@ with tab_fuhrpark:
         use_container_width=True,
         hide_index=True,
         column_config=col_config,
-        key=f"truck_matrix_{start_of_week}" 
+        key="truck_matrix_editor" 
     )
     
     trucks_changed = False
@@ -575,7 +590,7 @@ with tab_kunden:
             "1 - Sägemehl": st.column_config.CheckboxColumn("Sägemehl", default=False),
             "2 - Hackschnitzel": st.column_config.CheckboxColumn("Hackschnitzel", default=False),
             "3 - Rinde": st.column_config.CheckboxColumn("Rinde", default=False),
-            "4 - Kappholz": st.column_config.CheckboxColumn("Kappholz", default=False),
+            "4 - Kappholz": st.column_config.CheckboxColumn("4 - Kappholz", default=False),
         },
         hide_index=True,
         key="customer_editor"

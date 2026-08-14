@@ -64,7 +64,6 @@ def save_persistent_data():
     }
     db.save_app_state(data)
 
-# Funktion, die die Daten von der DB lädt und in die Session-State schreibt
 def refresh_data_from_db():
     saved_data = load_persistent_data()
     st.session_state["shift_hours"] = float(saved_data.get("shift_hours", 9.0))
@@ -78,7 +77,6 @@ def refresh_data_from_db():
     st.session_state["bunker_ri"] = b_saved.get("bunker_ri", 50)
     st.session_state["bunker_kp"] = b_saved.get("bunker_kp", 50)
     
-    # Gebuchte Touren synchronisieren (nur wenn nicht gerade bearbeitet wird)
     if "booked_trips" not in st.session_state or not st.session_state.get("edit_mode", False):
         st.session_state["booked_trips"] = saved_data.get("booked_trips", [])
         st.session_state["ext_booked_trips"] = saved_data.get("ext_booked_trips", [])
@@ -112,7 +110,6 @@ if "firebase_loaded" not in st.session_state:
     refresh_data_from_db()
     st.session_state["firebase_loaded"] = True
 
-# Sicherstellen, dass Variablen existieren
 if "truck_status_db" not in st.session_state: st.session_state["truck_status_db"] = {}
 if "blocked_customers" not in st.session_state: st.session_state["blocked_customers"] = {}
 if "customer_db" not in st.session_state: st.session_state["customer_db"] = pd.DataFrame()
@@ -142,10 +139,10 @@ with col_status:
     if edit_mode:
         st.warning("⏸️ Auto-refresh inaktiv")
     else:
-        st.success("✅ Autorefresh aktiv (30s)")
-        # Wenn nicht im Edit-Mode, refreshen wir die Daten von der Datenbank
+        st.success("✅ Autorefresh aktiv (5s)")
         refresh_data_from_db()
-        st_autorefresh(interval=30000, limit=None, key="data_refresh")
+        # Auf 5.000 Millisekunden (5 Sekunden) gesetzt
+        st_autorefresh(interval=5000, limit=None, key="data_refresh")
 
 # ==========================================
 # LOGIK & UI
@@ -200,7 +197,6 @@ with tab_dispo:
         st.rerun()
     st.divider()
 
-    # Algorithmus
     bunker_levels = {"1 - Sägemehl": st.session_state.bunker_sm, "2 - Hackschnitzel": st.session_state.bunker_hs, "3 - Rinde": st.session_state.bunker_ri, "4 - Kappholz": st.session_state.bunker_kp}
     remaining_quotas = {}
     for k, v in st.session_state.quotas_state.items():

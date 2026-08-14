@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import json
 from datetime import datetime, timedelta, date
 
 from streamlit_autorefresh import st_autorefresh
@@ -40,7 +41,7 @@ STATUS_AUSHILFE = "🟢 Aushilfe (17-21)"
 TRUCK_STATUS_OPTIONS = [STATUS_VERFUEGBAR, STATUS_AUSFALL, STATUS_AUSHILFE]
 
 # ==========================================
-# DATEN-SYNCHRONISIERUNG
+# DATEN-SYNCHRONISIERUNG (DOUBLE-ENTRY BUG FIX)
 # ==========================================
 def load_persistent_data():
     return db.load_app_state()
@@ -63,14 +64,36 @@ def save_persistent_data():
         "booked_trips": st.session_state.get("booked_trips", []),
         "ext_booked_trips": st.session_state.get("ext_booked_trips", [])
     }
-    db.save_app_state(data)
+    
+    # JSON-Bereinigung, damit Datentypen (z.B. Pandas-Floats) 100% sauber sind
+    try:
+        clean_data = json.loads(json.dumps(data, default=str))
+    except Exception:
+        clean_data = data
+        
+    db.save_app_state(clean_data)
+    # GANZ WICHTIG: Die App merkt sich ihren eigenen Speicherstand, um sich nicht selbst zu überschreiben!
+    st.session_state["last_db_state"] = clean_data
 
 def sync_from_db():
     if not st.session_state.get("edit_mode", False):
         saved = load_persistent_data()
         if not saved: return
         
-        b_saved = saved.get("bunkers", {})
+        try:
+            clean_saved = json.loads(json.dumps(saved, default=str))
+        except Exception:
+            clean_saved = saved
+            
+        # DOUBLE-ENTRY BUG FIX: 
+        # Wenn sich die Datenbank von außen NICHT geändert hat, brechen wir sofort ab!
+        if st.session_state.get("last_db_state") == clean_saved:
+            return 
+            
+        st.session_state["last_db_state"] = clean_saved
+        
+        # Ab hier: Es gibt ECHTE externe Änderungen (z.B. vom Handy)
+        b_saved = clean_saved.get("bunkers", {})
         for k in ["bunker_sm", "bunker_hs", "bunker_ri", "bunker_kp"]:
             remote_val = b_saved.get(k, 50)
             local_val = st.session_state.get(k, 50)
@@ -80,30 +103,30 @@ def sync_from_db():
                 st.session_state[v_key] = st.session_state.get(v_key, 0) + 1
                     
         for k in ["shift_hours", "truck_cap"]:
-            r_val = saved.get(k)
+            r_val = clean_saved.get(k)
             if r_val is not None and st.session_state.get(k) != r_val:
                 st.session_state[k] = r_val
                 
-        new_trucks = saved.get("truck_status_db", {})
+        new_trucks = clean_saved.get("truck_status_db", {})
         if st.session_state.get("truck_status_db", {}) != new_trucks:
             st.session_state["truck_status_db"] = new_trucks
             st.session_state["truck_db_version"] = st.session_state.get("truck_db_version", 0) + 1
             
-        new_cust_df = pd.DataFrame(saved.get("customer_db", []))
+        new_cust_df = pd.DataFrame(clean_saved.get("customer_db", []))
         if "customer_db" not in st.session_state or not new_cust_df.equals(st.session_state["customer_db"]):
             st.session_state["customer_db"] = new_cust_df
             st.session_state["cust_db_version"] = st.session_state.get("cust_db_version", 0) + 1
 
-        saved_ext_by_week = saved.get("ext_terminal_db_by_week", {})
-        if not saved_ext_by_week and "ext_terminal_db" in saved:
-            saved_ext_by_week = {"legacy": saved["ext_terminal_db"]}
+        saved_ext_by_week = clean_saved.get("ext_terminal_db_by_week", {})
+        if not saved_ext_by_week and "ext_terminal_db" in clean_saved:
+            saved_ext_by_week = {"legacy": clean_saved["ext_terminal_db"]}
             
         new_ext_by_week = {k: pd.DataFrame(v) for k, v in saved_ext_by_week.items()}
         st.session_state["ext_terminal_db_by_week"] = new_ext_by_week
         st.session_state["ext_db_version"] = st.session_state.get("ext_db_version", 0) + 1
             
         new_quotas = {}
-        for k_str, v in saved.get("quotas_state", {}).items():
+        for k_str, v in clean_saved.get("quotas_state", {}).items():
             parts = k_str.split("|||")
             if len(parts) == 3:
                 new_quotas[(parts[0], parts[1], parts[2])] = v
@@ -114,9 +137,9 @@ def sync_from_db():
             st.session_state["quotas_state"] = new_quotas
             st.session_state["quotas_version"] = st.session_state.get("quotas_version", 0) + 1
 
-        st.session_state["booked_trips"] = saved.get("booked_trips", [])
-        st.session_state["ext_booked_trips"] = saved.get("ext_booked_trips", [])
-        st.session_state["blocked_customers"] = saved.get("blocked_customers", {})
+        st.session_state["booked_trips"] = clean_saved.get("booked_trips", [])
+        st.session_state["ext_booked_trips"] = clean_saved.get("ext_booked_trips", [])
+        st.session_state["blocked_customers"] = clean_saved.get("blocked_customers", {})
 
 def parse_time_str(t_str):
     try:
@@ -444,7 +467,6 @@ with tab_dispo:
         for (c, p), rem in remaining_quotas.items():
             if rem > 0:
                 b_level = bunker_levels.get(p, 50)
-                # Neuer, angepasster Hinweistext zur 4h-Regel
                 grund = f"⛔ Bunker gesperrt ({b_level}%)" if b_level <= 19 else "⏳ Keine Kapazität / Unwirtschaftlich (< 4h)"
                 unrealizable.append({"Kunde": c, "Produkt": p, "Fehlende Fuhren": rem, "Ursache": grund})
                 
@@ -624,7 +646,7 @@ with tab_abholungen:
         current_ext_df,
         use_container_width=True,
         num_rows="dynamic",
-        column_order=EXT_COL_ORDER,   # <--- DIESE ZEILE FIXIERT DIE SPALTEN
+        column_order=EXT_COL_ORDER,
         column_config={
             "Produkt / Artikel": st.column_config.SelectboxColumn("Produkt", options=PRODUCT_LIST, default="1 - Sägemehl"),
             "Kunde": st.column_config.TextColumn("Kunde (Freitext)", default="", required=True),

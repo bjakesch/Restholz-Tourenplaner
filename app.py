@@ -40,7 +40,7 @@ STATUS_AUSHILFE = "🟢 Aushilfe (17-21)"
 TRUCK_STATUS_OPTIONS = [STATUS_VERFUEGBAR, STATUS_AUSFALL, STATUS_AUSHILFE]
 
 # ==========================================
-# DATEN-SYNCHRONISIERUNG (WOCHEN-ISOLIERT)
+# DATEN-SYNCHRONISIERUNG
 # ==========================================
 def load_persistent_data():
     return db.load_app_state()
@@ -58,11 +58,8 @@ def save_persistent_data():
             "bunker_kp": int(st.session_state.get("bunker_kp", 50))
         },
         "customer_db": st.session_state.customer_db.to_dict(orient="records") if "customer_db" in st.session_state else [],
-        
-        # Neue speicherung wochenweise
         "ext_terminal_db_by_week": {k: v.to_dict(orient="records") for k, v in st.session_state.get("ext_terminal_db_by_week", {}).items()},
         "quotas_state": {f"{k[0]}|||{k[1]}|||{k[2]}": v for k, v in st.session_state.get("quotas_state", {}).items()},
-        
         "booked_trips": st.session_state.get("booked_trips", []),
         "ext_booked_trips": st.session_state.get("ext_booked_trips", [])
     }
@@ -97,7 +94,6 @@ def sync_from_db():
             st.session_state["customer_db"] = new_cust_df
             st.session_state["cust_db_version"] = st.session_state.get("cust_db_version", 0) + 1
 
-        # Migration und Sync für wochenbasierte Fremdfuhren
         saved_ext_by_week = saved.get("ext_terminal_db_by_week", {})
         if not saved_ext_by_week and "ext_terminal_db" in saved:
             saved_ext_by_week = {"legacy": saved["ext_terminal_db"]}
@@ -106,7 +102,6 @@ def sync_from_db():
         st.session_state["ext_terminal_db_by_week"] = new_ext_by_week
         st.session_state["ext_db_version"] = st.session_state.get("ext_db_version", 0) + 1
             
-        # Migration und Sync für wochenbasierte Kontingente
         new_quotas = {}
         for k_str, v in saved.get("quotas_state", {}).items():
             parts = k_str.split("|||")
@@ -180,10 +175,8 @@ start_of_week = selected_date - timedelta(days=selected_date.weekday())
 week_dates = [start_of_week + timedelta(days=i) for i in range(5)]
 valid_date_strs = [d.strftime("%Y-%m-%d") for d in week_dates]
 
-# Die eindeutige ID der aktuellen Planungswoche (Immer der Montag!)
 week_str = start_of_week.strftime("%Y-%m-%d")
 
-# Wochen-Initialisierung für Abholungen (Falls man in eine neue Woche springt)
 if "ext_terminal_db_by_week" not in st.session_state:
     st.session_state["ext_terminal_db_by_week"] = {}
     
@@ -293,7 +286,6 @@ with tab_dispo:
 
     st.divider()
 
-    # --- DATEN VORBEREITEN & ALGORITHMUS LAUFEN LASSEN ---
     bunker_levels = {
         "1 - Sägemehl": int(st.session_state.get("bunker_sm", 50)),
         "2 - Hackschnitzel": int(st.session_state.get("bunker_hs", 50)),
@@ -375,7 +367,6 @@ with tab_dispo:
             remaining_quotas[(trip["Kunde"], trip["Produkt"])] -= 1
             last_prod_tracker = trip["Produkt"]
 
-    # --- UNTER-REITER FÜR KALENDER & AUSWERTUNG ---
     t_cal, t_ausw = st.tabs(["📅 Planungskalender", "📊 Wochen-Auswertung"])
     
     with t_cal:
@@ -421,7 +412,6 @@ with tab_dispo:
     with t_ausw:
         st.markdown("### Kennzahlen zur ausgewählten Planungs-Woche")
         
-        # Isolation auf aktuelle Woche
         week_own_count = sum(1 for b in st.session_state.booked_trips if b.get("Datum") in valid_date_strs)
         eigen_soll = sum(v.get("soll", 0) for (w, c, p), v in st.session_state.quotas_state.items() if w == week_str)
         
@@ -454,7 +444,8 @@ with tab_dispo:
         for (c, p), rem in remaining_quotas.items():
             if rem > 0:
                 b_level = bunker_levels.get(p, 50)
-                grund = f"⛔ Bunker gesperrt ({b_level}%)" if b_level <= 19 else "⏳ LKW-Tageskapazitäten ausgeschöpft"
+                # Neuer, angepasster Hinweistext zur 4h-Regel
+                grund = f"⛔ Bunker gesperrt ({b_level}%)" if b_level <= 19 else "⏳ Keine Kapazität / Unwirtschaftlich (< 4h)"
                 unrealizable.append({"Kunde": c, "Produkt": p, "Fehlende Fuhren": rem, "Ursache": grund})
                 
         if unrealizable:
@@ -763,7 +754,6 @@ with tab_logbuch:
                 idx_to_del = int(selected_del_ext_str.split(" | ")[0])
                 deleted_trip = st.session_state.ext_booked_trips.pop(idx_to_del)
                 
-                # Zähler in der isolierten Woche reduzieren
                 ext_df = st.session_state.ext_terminal_db_by_week[week_str]
                 for idx, row in ext_df.iterrows():
                     if (row.get("Produkt / Artikel") == deleted_trip.get("Produkt") and 

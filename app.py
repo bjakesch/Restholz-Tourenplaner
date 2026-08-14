@@ -159,11 +159,11 @@ with col_head:
     st.title("Restholz-Tourenplaner")
 
 with col_date:
-    st.write("") # Kleiner Platzhalter nach oben
+    st.write("") 
     selected_date = st.date_input("📅 Planungswoche (beliebiger Tag)", value=datetime.today().date())
 
 with col_status:
-    st.write("") # Kleiner Platzhalter nach oben
+    st.write("") 
     edit_mode = st.toggle("✏️ Bearbeitungsmodus", value=False, help="Pausiert das Live-Laden für Eingaben.")
     if edit_mode:
         st.warning("⏸️ Auto-refresh inaktiv")
@@ -227,6 +227,40 @@ tab_dispo, tab_fuhrpark, tab_kontingente, tab_abholungen, tab_kunden, tab_logbuc
 # TAB 1: DAS TAGESGESCHÄFT (DISPOKALENDER)
 # ------------------------------------------
 with tab_dispo:
+    # --- MANUELLE VERBUCHUNG GANZ OBEN ---
+    st.markdown("### 🛠️ Manuelle Verbuchung (Eigenfuhrpark)")
+    m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
+    
+    cust_keys = list(cust_duration_map.keys()) if 'cust_duration_map' in locals() and cust_duration_map else ["-"]
+    
+    m_kunde_raw = m_col1.selectbox("Kunde", cust_keys, key="m_kunde_sel")
+    m_prod = m_col2.selectbox("Produkt", PRODUCT_LIST, key="m_prod_sel")
+    m_date = m_col3.date_input("Datum", value=selected_date, key="m_date_sel")
+    m_truck = m_col4.selectbox("Fahrzeug", TRUCK_PRIO, key="m_truck_sel")
+    m_dauer = cust_duration_map.get(m_kunde_raw, 2.0) if 'cust_duration_map' in locals() else 2.0
+    
+    # Damit der Button optisch bündig abschließt, packen wir ihn ein Stück nach unten
+    st.markdown("""
+        <style>
+        .stButton button { margin-top: 28px; }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    if m_col5.button("⚡ Verbuchen", use_container_width=True, type="primary") and m_kunde_raw != "-":
+        d_str_manual = m_date.strftime("%Y-%m-%d")
+        m_id = f"manual_{d_str_manual}_{m_truck}_{m_kunde_raw}_{m_prod}_{len(st.session_state.booked_trips)}"
+        st.session_state.booked_trips.append({
+            "id": m_id, "Datum": d_str_manual, "Fahrzeug": m_truck, "Zeitfenster": "Manuell",
+            "Kunde": m_kunde_raw, "Produkt": m_prod, "Menge_m3": st.session_state.truck_cap, "dauer_h": m_dauer,
+            "score": 99, "is_manual": True
+        })
+        save_persistent_data()
+        st.success("Tour manuell verbucht!")
+        st.rerun()
+
+    st.divider()
+
+    # --- ALGORITHMUS & KALENDER UNTERHALB ---
     bunker_levels = {
         "1 - Sägemehl": st.session_state.bunker_sm,
         "2 - Hackschnitzel": st.session_state.bunker_hs,
@@ -367,28 +401,23 @@ with tab_fuhrpark:
     
     truck_db = st.session_state.truck_status_db
     
-    # 1. Spalten-Namen für die 5 Tage der ausgewählten Woche generieren
     day_cols = []
     date_strs = []
     for d_obj in week_dates:
         d_str = d_obj.strftime("%Y-%m-%d")
-        # Macht daraus z.B. "Montag, 14.08."
         col_name = f"{WEEKDAYS_GERMAN[d_obj.weekday()]}, {d_obj.strftime('%d.%m.')}"
         day_cols.append(col_name)
         date_strs.append(d_str)
 
-    # 2. Die Matrix aufbauen (Y-Achse: Fahrzeuge, X-Achse: Tage)
     matrix_rows = []
     for t in TRUCK_PRIO:
         row = {"Fahrzeug": t}
         for d_str, col_name in zip(date_strs, day_cols):
-            # Holt den Wert aus der Datenbank, falls nicht vorhanden, ist der Standard "Verfügbar"
             row[col_name] = truck_db.get(d_str, {}).get(t, STATUS_VERFUEGBAR)
         matrix_rows.append(row)
             
     df_truck_status = pd.DataFrame(matrix_rows)
     
-    # 3. Spaltenkonfiguration für Streamlit Data Editor
     col_config = {"Fahrzeug": st.column_config.TextColumn("Fahrzeug", disabled=True)}
     for col_name in day_cols:
         col_config[col_name] = st.column_config.SelectboxColumn(
@@ -402,21 +431,16 @@ with tab_fuhrpark:
         use_container_width=True,
         hide_index=True,
         column_config=col_config,
-        # Wenn sich die ausgewählte Woche ändert, zeichnet Streamlit die Tabelle neu
         key=f"truck_matrix_{start_of_week}" 
     )
     
-    # 4. Änderungen in die Datenbank zurückschreiben
     trucks_changed = False
     for _, row in edited_trucks.iterrows():
         t = row["Fahrzeug"]
         for d_str, col_name in zip(date_strs, day_cols):
             new_status = row[col_name]
-            
             if d_str not in truck_db: 
                 truck_db[d_str] = {}
-                
-            # Nur speichern, wenn sich der Status verändert hat
             if truck_db[d_str].get(t, STATUS_VERFUEGBAR) != new_status:
                 truck_db[d_str][t] = new_status
                 trucks_changed = True
@@ -570,31 +594,6 @@ with tab_abholungen:
             save_persistent_data()
             st.success("Fremdfuhre verbucht!")
             st.rerun()
-
-    st.divider()
-
-    st.markdown("### 🛠️ Manuelle Verbuchung (Eigenfuhrpark)")
-    m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
-    
-    cust_keys = list(cust_duration_map.keys()) if 'cust_duration_map' in locals() and cust_duration_map else ["-"]
-    
-    m_kunde_raw = m_col1.selectbox("Kunde", cust_keys, key="m_kunde_sel")
-    m_prod = m_col2.selectbox("Produkt", PRODUCT_LIST, key="m_prod_sel")
-    m_date = m_col3.date_input("Datum", value=selected_date, key="m_date_sel")
-    m_truck = m_col4.selectbox("Fahrzeug", TRUCK_PRIO, key="m_truck_sel")
-    m_dauer = cust_duration_map.get(m_kunde_raw, 2.0) if 'cust_duration_map' in locals() else 2.0
-    
-    if m_col5.button("⚡ Verbuchen", use_container_width=True, type="primary") and m_kunde_raw != "-":
-        d_str_manual = m_date.strftime("%Y-%m-%d")
-        m_id = f"manual_{d_str_manual}_{m_truck}_{m_kunde_raw}_{m_prod}_{len(st.session_state.booked_trips)}"
-        st.session_state.booked_trips.append({
-            "id": m_id, "Datum": d_str_manual, "Fahrzeug": m_truck, "Zeitfenster": "Manuell",
-            "Kunde": m_kunde_raw, "Produkt": m_prod, "Menge_m3": st.session_state.truck_cap, "dauer_h": m_dauer,
-            "score": 99, "is_manual": True
-        })
-        save_persistent_data()
-        st.success("Tour manuell verbucht!")
-        st.rerun()
 
 
 # ------------------------------------------

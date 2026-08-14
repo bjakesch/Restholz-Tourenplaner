@@ -600,40 +600,38 @@ with tab_abholungen:
 # TAB 5: KUNDENDATENBANK
 # ------------------------------------------
 with tab_kunden:
-st.markdown("### 👥 Kundendatenbank (Stammdaten)")
-
-# Die feste Reihenfolge der Spalten OHNE Priorität
-col_order = [
-    "Kunde", 
-    "Umlaufzeit (hh:mm)", 
-    "1 - Sägemehl", 
-    "2 - Hackschnitzel", 
-    "3 - Rinde", 
-    "4 - Kappholz"
-]
-
-edited_cust_db_input = st.data_editor(
-    st.session_state.customer_db,
-    num_rows="dynamic",
-    use_container_width=True,
-    column_order=col_order,
-    column_config={
-        "Kunde": st.column_config.TextColumn("Kundenname", required=True),
-        "Umlaufzeit (hh:mm)": st.column_config.TextColumn("Umlaufzeit (hh:mm)", default="02:00", required=True),
-        "1 - Sägemehl": st.column_config.CheckboxColumn("Sägemehl", default=False),
-        "2 - Hackschnitzel": st.column_config.CheckboxColumn("Hackschnitzel", default=False),
-        "3 - Rinde": st.column_config.CheckboxColumn("Rinde", default=False),
-        "4 - Kappholz": st.column_config.CheckboxColumn("Kappholz", default=False),
-    },
-    hide_index=True,
-    key="customer_editor"
-)
-
-if not edited_cust_db_input.equals(st.session_state.customer_db):
-    st.session_state.customer_db = edited_cust_db_input
-    save_persistent_data()
-
-
+    st.markdown("### 👥 Kundendatenbank (Stammdaten)")
+    
+    # Die feste Reihenfolge der Spalten OHNE Priorität
+    col_order = [
+        "Kunde", 
+        "Umlaufzeit (hh:mm)", 
+        "1 - Sägemehl", 
+        "2 - Hackschnitzel", 
+        "3 - Rinde", 
+        "4 - Kappholz"
+    ]
+    
+    edited_cust_db_input = st.data_editor(
+        st.session_state.customer_db,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_order=col_order,
+        column_config={
+            "Kunde": st.column_config.TextColumn("Kundenname", required=True),
+            "Umlaufzeit (hh:mm)": st.column_config.TextColumn("Umlaufzeit (hh:mm)", default="02:00", required=True),
+            "1 - Sägemehl": st.column_config.CheckboxColumn("Sägemehl", default=False),
+            "2 - Hackschnitzel": st.column_config.CheckboxColumn("Hackschnitzel", default=False),
+            "3 - Rinde": st.column_config.CheckboxColumn("Rinde", default=False),
+            "4 - Kappholz": st.column_config.CheckboxColumn("Kappholz", default=False),
+        },
+        hide_index=True,
+        key="customer_editor"
+    )
+    
+    if not edited_cust_db_input.equals(st.session_state.customer_db):
+        st.session_state.customer_db = edited_cust_db_input
+        save_persistent_data()
 # ------------------------------------------
 # TAB 6: LOGBUCH
 # ------------------------------------------

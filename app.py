@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import json
 from datetime import datetime, timedelta, date
+from zoneinfo import ZoneInfo  # NEU: Zeitzonen-Modul importieren
 
 from streamlit_autorefresh import st_autorefresh
 import database as db
@@ -12,6 +13,9 @@ import logistics
 # PAGE CONFIG & PFADE
 # ==========================================
 st.set_page_config(page_title="Restholz-Tourenplaner", layout="wide", page_icon="🪵")
+
+# FESTE ZEITZONE FÜR DEUTSCHLAND
+GERMAN_TZ = ZoneInfo("Europe/Berlin")
 
 # ==========================================
 # CUSTOM CSS
@@ -185,7 +189,8 @@ with col_head:
 
 with col_date:
     st.write("") 
-    selected_date = st.date_input("📅 Planungswoche (beliebiger Tag)", value=datetime.today().date())
+    # NEU: Auch hier auf GERMAN_TZ umgestellt
+    selected_date = st.date_input("📅 Planungswoche (beliebiger Tag)", value=datetime.now(GERMAN_TZ).date())
 
 with col_status:
     st.write("") 
@@ -200,7 +205,7 @@ with col_status:
 # ==========================================
 # LOGIK & HILFSVARIABLEN
 # ==========================================
-today = datetime.now().date()
+today = datetime.now(GERMAN_TZ).date()
 start_of_week = selected_date - timedelta(days=selected_date.weekday())
 week_dates = [start_of_week + timedelta(days=i) for i in range(5)]
 valid_date_strs = [d.strftime("%Y-%m-%d") for d in week_dates]
@@ -308,7 +313,7 @@ with tab_dispo:
         st.session_state.booked_trips.append({
             "id": m_id, "Datum": d_str_manual, "Fahrzeug": m_truck, "Zeitfenster": "Manuell",
             "Kunde": m_kunde_raw, "Produkt": m_prod, "Menge_m3": st.session_state.truck_cap, "dauer_h": m_dauer,
-            "score": 99, "is_manual": True, "created_at": datetime.now().timestamp()
+            "score": 99, "is_manual": True, "created_at": datetime.now(GERMAN_TZ).timestamp()
         })
         save_persistent_data()
         st.success("Tour manuell verbucht!")
@@ -342,7 +347,6 @@ with tab_dispo:
             truck_used_hours[b_date][b_truck] += b.get("dauer_h", 2.0)
             truck_tour_counts[b_date][b_truck] += 1
 
-    # GLOBALEN TRACKER ERMITTELN (Nur SM/HS, absolut chronologisch inkl. Fremdfuhren)
     last_sm_hs_tracker = None
     all_b = st.session_state.booked_trips + st.session_state.ext_booked_trips
     all_b_sorted = sorted(all_b, key=lambda x: x.get("created_at", 0))
@@ -437,7 +441,8 @@ with tab_dispo:
                             if not is_man and not is_past:
                                 if st.button(f"📌 Fixieren", key=f"btn_book_{d_str}_{t}_{trip['id']}"):
                                     trip["is_manual"] = True
-                                    trip["created_at"] = datetime.now().timestamp()
+                                    # NEU: Deutscher Zeitstempel beim Fixieren
+                                    trip["created_at"] = datetime.now(GERMAN_TZ).timestamp()
                                     if trip.get('Zeitfenster') == "Manuell":
                                         trip['Zeitfenster'] = f"Tour {truck_tour_counts[d_str][t] + 1} (Fix)"
                                     st.session_state.booked_trips.append(trip)
@@ -675,12 +680,13 @@ with tab_abholungen:
                 booked_row = st.session_state.ext_terminal_db_by_week[week_str].iloc[row_idx]
                 
                 st.session_state.ext_booked_trips.append({
-                    "Zeitpunkt": datetime.now().strftime("%d.%m.%Y %H:%M"),
+                    # NEU: Deutscher Zeitstempel
+                    "Zeitpunkt": datetime.now(GERMAN_TZ).strftime("%d.%m.%Y %H:%M"),
                     "Produkt": booked_row.get("Produkt / Artikel"),
                     "Kunde": booked_row.get("Kunde"),
                     "Spedition": booked_row.get("Frachtführer / Spedition"),
                     "Einsatztag": booked_row.get("Einsatztag") or "Keiner",
-                    "created_at": datetime.now().timestamp()
+                    "created_at": datetime.now(GERMAN_TZ).timestamp()
                 })
                 save_persistent_data()
                 st.success("Fremdfuhre verbucht!")

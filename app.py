@@ -44,10 +44,6 @@ TRUCK_STATUS_OPTIONS = [STATUS_VERFUEGBAR, STATUS_AUSFALL, STATUS_AUSHILFE]
 # DATENSCHUTZ (SANITIZER FÜR LEERE ZEILEN)
 # ==========================================
 def sanitize_df(df):
-    """
-    Diese Funktion bügelt alle Fehler bei leeren/neuen Zeilen (NaN/None) glatt,
-    bevor sie verglichen oder in der Datenbank gespeichert werden.
-    """
     if df is None or df.empty:
         return pd.DataFrame(columns=df.columns) if df is not None else pd.DataFrame()
         
@@ -127,7 +123,6 @@ def sync_from_db():
         if st.session_state.get("truck_status_db", {}) != new_trucks:
             st.session_state["truck_status_db"] = new_trucks
             
-        # SANITIZER BEIM LADEN ANWENDEN
         new_cust_df = sanitize_df(pd.DataFrame(clean_saved.get("customer_db", [])))
         if "customer_db" not in st.session_state or not new_cust_df.equals(st.session_state["customer_db"]):
             st.session_state["customer_db"] = new_cust_df
@@ -136,7 +131,6 @@ def sync_from_db():
         if not saved_ext_by_week and "ext_terminal_db" in clean_saved:
             saved_ext_by_week = {"legacy": clean_saved["ext_terminal_db"]}
             
-        # SANITIZER BEIM LADEN ANWENDEN
         new_ext_by_week = {k: sanitize_df(pd.DataFrame(v)) for k, v in saved_ext_by_week.items()}
         st.session_state["ext_terminal_db_by_week"] = new_ext_by_week
             
@@ -314,7 +308,7 @@ with tab_dispo:
         st.session_state.booked_trips.append({
             "id": m_id, "Datum": d_str_manual, "Fahrzeug": m_truck, "Zeitfenster": "Manuell",
             "Kunde": m_kunde_raw, "Produkt": m_prod, "Menge_m3": st.session_state.truck_cap, "dauer_h": m_dauer,
-            "score": 99, "is_manual": True
+            "score": 99, "is_manual": True, "created_at": datetime.now().timestamp()
         })
         save_persistent_data()
         st.success("Tour manuell verbucht!")
@@ -339,10 +333,6 @@ with tab_dispo:
     truck_used_hours = {d.strftime("%Y-%m-%d"): {t: 0.0 for t in TRUCK_PRIO} for d in week_dates}
     truck_tour_counts = {d.strftime("%Y-%m-%d"): {t: 0 for t in TRUCK_PRIO} for d in week_dates}
 
-    last_prod_tracker = None
-    if st.session_state.booked_trips:
-        last_prod_tracker = st.session_state.booked_trips[-1].get("Produkt")
-
     for b in st.session_state.booked_trips:
         b_date = b.get("Datum")
         b_truck = b.get("Fahrzeug")
@@ -351,6 +341,15 @@ with tab_dispo:
             schedule_by_day[b_date][b_truck].append(b)
             truck_used_hours[b_date][b_truck] += b.get("dauer_h", 2.0)
             truck_tour_counts[b_date][b_truck] += 1
+
+    # GLOBALEN TRACKER ERMITTELN (Nur SM/HS, absolut chronologisch inkl. Fremdfuhren)
+    last_sm_hs_tracker = None
+    all_b = st.session_state.booked_trips + st.session_state.ext_booked_trips
+    all_b_sorted = sorted(all_b, key=lambda x: x.get("created_at", 0))
+    for b in all_b_sorted:
+        p = b.get("Produkt", "")
+        if p in ["1 - Sägemehl", "2 - Hackschnitzel"]:
+            last_sm_hs_tracker = p
 
     for d_obj in week_dates:
         d_str = d_obj.strftime("%Y-%m-%d")
@@ -391,7 +390,7 @@ with tab_dispo:
             truck_cap=st.session_state.truck_cap,
             initial_used_hours=truck_used_hours[d_str],
             initial_tour_counts=truck_tour_counts[d_str],
-            last_booked_product=last_prod_tracker
+            last_sm_hs=last_sm_hs_tracker
         )
 
         for trip in berechnete_touren:
@@ -401,7 +400,9 @@ with tab_dispo:
             schedule_by_day[d_str][t].append(trip)
             truck_used_hours[d_str][t] += trip["dauer_h"]
             remaining_quotas[(trip["Kunde"], trip["Produkt"])] -= 1
-            last_prod_tracker = trip["Produkt"]
+            
+            if trip["Produkt"] in ["1 - Sägemehl", "2 - Hackschnitzel"]:
+                last_sm_hs_tracker = trip["Produkt"]
 
     t_cal, t_ausw = st.tabs(["📅 Planungskalender", "📊 Wochen-Auswertung"])
     
@@ -439,6 +440,7 @@ with tab_dispo:
                             if not is_man and not is_past:
                                 if st.button(f"📌 Fixieren", key=f"btn_book_{d_str}_{t}_{trip['id']}"):
                                     trip["is_manual"] = True
+                                    trip["created_at"] = datetime.now().timestamp()
                                     if trip.get('Zeitfenster') == "Manuell":
                                         trip['Zeitfenster'] = f"Tour {truck_tour_counts[d_str][t] + 1} (Fix)"
                                     st.session_state.booked_trips.append(trip)
@@ -655,7 +657,6 @@ with tab_abholungen:
     
     current_ext_df = st.session_state.ext_terminal_db_by_week[week_str]
 
-    # 1. BEREICH: SCHNELL-VERBUCHUNG (Jetzt oben!)
     st.markdown("#### ⚡ Schnell-Verbuchung (+1)")
     
     if not current_ext_df.empty:
@@ -681,7 +682,8 @@ with tab_abholungen:
                     "Produkt": booked_row.get("Produkt / Artikel"),
                     "Kunde": booked_row.get("Kunde"),
                     "Spedition": booked_row.get("Frachtführer / Spedition"),
-                    "Einsatztag": booked_row.get("Einsatztag") or "Keiner"
+                    "Einsatztag": booked_row.get("Einsatztag") or "Keiner",
+                    "created_at": datetime.now().timestamp()
                 })
                 save_persistent_data()
                 st.success("Fremdfuhre verbucht!")
@@ -691,7 +693,6 @@ with tab_abholungen:
 
     st.divider()
 
-    # 2. BEREICH: MASSENBEARBEITUNG IN EINEM FORMULAR (Jetzt unten!)
     with st.form("ext_terminal_form"):
         st.info("💡 **Massenbearbeitung:** Tippe hier in Ruhe deine Änderungen ein. Die App speichert und synchronisiert erst, wenn du unten auf den Speichern-Button klickst.")
         

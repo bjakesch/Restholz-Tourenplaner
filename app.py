@@ -1,196 +1,834 @@
-import datetime
+import streamlit as st
+import pandas as pd
+import os
+import json
+from datetime import datetime, timedelta, date
+
+from streamlit_autorefresh import st_autorefresh
+import database as db
+import logistics
 
 # ==========================================
-# KONSTANTEN & STAMMDATEN
+# PAGE CONFIG & PFADE
 # ==========================================
-TRUCK_PRIO = ["RA KH 14", "RA KH 92", "RA KH 24"]
+st.set_page_config(page_title="Restholz-Tourenplaner", layout="wide", page_icon="🪵")
+
+# ==========================================
+# CUSTOM CSS
+# ==========================================
+st.markdown("""
+    <style>
+    div[aria-label*="Aushilfsfahrer"] span[data-baseweb="tag"] { background-color: #2e7d32 !important; color: white !important; }
+    .cal-day-header { background-color: #f0f2f6; padding: 8px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 10px; border: 1px solid #dcdcdc; }
+    .cal-card { border-left: 4px solid #1b5e20; background-color: #ffffff; padding: 6px 8px; border-radius: 4px; margin-bottom: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-size: 0.85em; }
+    .cal-card-manual { border-left: 4px solid #1976d2; background-color: #f5f9ff; }
+    .cal-card-past { border-left: 4px solid #9e9e9e; background-color: #f5f5f5; color: #777;}
+    .stButton button { margin-top: 28px; }
+    </style>
+""", unsafe_allow_html=True)
+
+# ==========================================
+# KONSTANTEN
+# ==========================================
 PRODUCT_LIST = ["1 - Sägemehl", "2 - Hackschnitzel", "3 - Rinde", "4 - Kappholz"]
-STANDARD_TRUCK_CAP = 103
-STANDARD_SHIFT_HOURS = 9.0
+WEEKDAYS_GERMAN = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+TRUCK_PRIO = ["RA KH 14", "RA KH 92", "RA KH 24"]
+EXT_COL_ORDER = ["Produkt / Artikel", "Kunde", "Frachtführer / Spedition", "SOLL (Fuhren)", "IST (Erfüllt)", "Einsatztag", "Bemerkung / Uhrzeit"]
+
+STATUS_VERFUEGBAR = "✅ Verfügbar"
+STATUS_AUSFALL = "❌ Ausfall"
+STATUS_AUSHILFE = "🟢 Aushilfe (17-21)"
+TRUCK_STATUS_OPTIONS = [STATUS_VERFUEGBAR, STATUS_AUSFALL, STATUS_AUSHILFE]
 
 # ==========================================
-# HILFSFUNKTIONEN ZUR BEWERTUNG
+# DATENSCHUTZ (SANITIZER FÜR LEERE ZEILEN)
 # ==========================================
-def calculate_base_score(prio, bunker_level, combined_sm_hs, dauer_h):
-    """
-    Berechnet den Basis-Score und gibt eine Text-Erklärung (Breakdown) zurück.
-    """
-    breakdown = []
-    
-    score = prio * 10
-    breakdown.append(f"Grund-Prio ({prio}): +{score}")
-    
-    if bunker_level >= 80: 
-        score += 30  
-        breakdown.append(f"Bunker kritisch ({bunker_level}%): +30")
+def sanitize_df(df):
+    if df is None or df.empty:
+        return pd.DataFrame(columns=df.columns) if df is not None else pd.DataFrame()
         
-    if combined_sm_hs > 130:
-        if dauer_h < 2.5:
-            score += 50
-            breakdown.append("Lager >130% & Kurztour (<2.5h): +50")
-        elif dauer_h < 3.0:
-            score += 40
-            breakdown.append("Lager >130% & Kurztour (<3.0h): +40")
-        elif dauer_h < 3.5:
-            score += 30
-            breakdown.append("Lager >130% & Kurztour (<3.5h): +30")
-            
-    elif combined_sm_hs < 60:
-        if dauer_h > 3.5:
-            score += 50
-            breakdown.append("Lager <60% & Langtour (>3.5h): +50")
-        elif dauer_h > 3.0:
-            score += 40
-            breakdown.append("Lager <60% & Langtour (>3.0h): +40")
-        elif dauer_h > 2.5:
-            score += 30
-            breakdown.append("Lager <60% & Langtour (>2.5h): +30")
-            
-    return score, breakdown
-
-def format_hours(hours_float):
-    hrs = int(hours_float)
-    mins = int(round((hours_float - hrs) * 60))
-    if mins == 60: 
-        hrs += 1
-        mins = 0
-    return f"{hrs:02d}:{mins:02d}"
+    df = df.copy()
+    for col in df.columns:
+        if col in ["SOLL (Fuhren)", "IST (Erfüllt)"]:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+        elif col in ["1 - Sägemehl", "2 - Hackschnitzel", "3 - Rinde", "4 - Kappholz"]:
+            df[col] = df[col].fillna(False).astype(bool)
+        else:
+            df[col] = df[col].fillna("").astype(str)
+    return df
 
 # ==========================================
-# HAUPT-ALGORITHMUS ZUR TOURENPLANUNG
+# DATEN-SYNCHRONISIERUNG
 # ==========================================
-def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_drivers=None, bunker_levels=None, shift_hours=STANDARD_SHIFT_HOURS, truck_cap=STANDARD_TRUCK_CAP, initial_used_hours=None, initial_tour_counts=None, last_sm_hs=None):
-    if blocked_trucks is None: blocked_trucks = []
-    if extra_drivers is None: extra_drivers = []
-    if bunker_levels is None: bunker_levels = {"1 - Sägemehl": 50, "2 - Hackschnitzel": 50, "3 - Rinde": 50, "4 - Kappholz": 50}
-    if initial_used_hours is None: initial_used_hours = {}
-    if initial_tour_counts is None: initial_tour_counts = {}
+def load_persistent_data():
+    return db.load_app_state()
+
+def save_persistent_data():
+    data = {
+        "shift_hours": st.session_state.get("shift_hours", 9.0),
+        "truck_cap": st.session_state.get("truck_cap", 103),
+        "truck_status_db": st.session_state.get("truck_status_db", {}),
+        "blocked_customers": st.session_state.get("blocked_customers", {}),
+        "bunkers": {
+            "bunker_sm": int(st.session_state.get("bunker_sm", 50)),
+            "bunker_hs": int(st.session_state.get("bunker_hs", 50)),
+            "bunker_ri": int(st.session_state.get("bunker_ri", 50)),
+            "bunker_kp": int(st.session_state.get("bunker_kp", 50))
+        },
+        "customer_db": st.session_state.customer_db.to_dict(orient="records") if "customer_db" in st.session_state else [],
+        "ext_terminal_db_by_week": {k: v.to_dict(orient="records") for k, v in st.session_state.get("ext_terminal_db_by_week", {}).items()},
+        "quotas_state": {f"{k[0]}|||{k[1]}|||{k[2]}": v for k, v in st.session_state.get("quotas_state", {}).items()},
+        "booked_trips": st.session_state.get("booked_trips", []),
+        "ext_booked_trips": st.session_state.get("ext_booked_trips", [])
+    }
     
-    active_trucks = [t for t in TRUCK_PRIO if t not in blocked_trucks]
-    truck_max_hours = {}
-    truck_used_hours = {}
-    truck_tour_counts = {}
-    
-    for t in active_trucks:
-        truck_max_hours[t] = shift_hours + (4.0 if t in extra_drivers else 0.0)
-        truck_used_hours[t] = initial_used_hours.get(t, 0.0)
-        truck_tour_counts[t] = initial_tour_counts.get(t, 0)
+    try:
+        clean_data = json.loads(json.dumps(data, default=str))
+    except Exception:
+        clean_data = data
         
-    combined_sm_hs = bunker_levels.get("1 - Sägemehl", 50) + bunker_levels.get("2 - Hackschnitzel", 50)
-    
-    candidates = []
-    for kontingent in offene_kontingente:
-        p_name = kontingent.get("produkt")
-        b_level = bunker_levels.get(p_name, 50)
+    db.save_app_state(clean_data)
+    st.session_state["last_db_state"] = clean_data
+
+def sync_from_db():
+    if not st.session_state.get("edit_mode", False):
+        saved = load_persistent_data()
+        if not saved: return
         
-        if b_level > 19 and kontingent.get("menge_fuhren", 0) > 0:
-            base_score, breakdown = calculate_base_score(
-                prio=kontingent.get("prio", 3), 
-                bunker_level=b_level, 
-                combined_sm_hs=combined_sm_hs, 
-                dauer_h=kontingent.get("dauer_h", 2.0)
-            )
-            candidates.append({
-                "Kunde": kontingent.get("kunde"),
-                "Produkt": p_name,
-                "dauer_h": kontingent.get("dauer_h", 2.0),
-                "base_score": base_score,
-                "breakdown": breakdown,
-                "rest_req": kontingent.get("bemerkung", "Keine"),
-                "offene_fuhren": kontingent.get("menge_fuhren", 0)
-            })
+        try:
+            clean_saved = json.loads(json.dumps(saved, default=str))
+        except Exception:
+            clean_saved = saved
             
-    berechnete_touren = []
-    
-    # Dieser Wert springt nun WÄHREND der Verplanung dynamisch um!
-    current_last_sm_hs = last_sm_hs
-    
-    while True:
-        best_cand_idx = -1
-        best_truck = None
-        max_score = -1
-        best_breakdown_str = ""
+        if st.session_state.get("last_db_state") == clean_saved:
+            return 
+            
+        st.session_state["last_db_state"] = clean_saved
         
-        for i, cand in enumerate(candidates):
-            if cand["offene_fuhren"] <= 0:
-                continue
-                
-            current_score = cand["base_score"]
-            current_bd = cand["breakdown"].copy()
-            p_name = cand["Produkt"]
-            
-            # Der Wechselbonus (Zick-Zack-Logik)
-            if current_last_sm_hs == "1 - Sägemehl" and p_name == "2 - Hackschnitzel":
-                current_score += 20
-                current_bd.append("Wechselbonus (zuvor wurde Säge verplant): +20")
-            elif current_last_sm_hs == "2 - Hackschnitzel" and p_name == "1 - Sägemehl":
-                current_score += 20
-                current_bd.append("Wechselbonus (zuvor wurde Hack verplant): +20")
-                
-            truck_fits = None
-            best_fit_bonus = 0
-            best_fit_reason = ""
-            
-            for t in active_trucks:
-                restzeit = truck_max_hours[t] - truck_used_hours[t]
-                
-                if cand["dauer_h"] <= restzeit + 0.1:
-                    if truck_used_hours[t] > 6.0:
-                        luecke = restzeit - cand["dauer_h"]
-                        if luecke >= -0.1 and luecke <= 1.0:
-                            temp_bonus = 40 
-                            if temp_bonus > best_fit_bonus:
-                                best_fit_bonus = temp_bonus
-                                truck_fits = t
-                                best_fit_reason = f"Lückenfüller (Restzeit {restzeit:.1f}h): +40"
+        b_saved = clean_saved.get("bunkers", {})
+        for k in ["bunker_sm", "bunker_hs", "bunker_ri", "bunker_kp"]:
+            remote_val = b_saved.get(k, 50)
+            local_val = st.session_state.get(k, 50)
+            if int(remote_val) != int(local_val):
+                st.session_state[k] = int(remote_val)
+                v_key = f"{k}_version"
+                st.session_state[v_key] = st.session_state.get(v_key, 0) + 1
                     
-                    if truck_fits is None:
-                        truck_fits = t
+        for k in ["shift_hours", "truck_cap"]:
+            r_val = clean_saved.get(k)
+            if r_val is not None and st.session_state.get(k) != r_val:
+                st.session_state[k] = r_val
+                
+        new_trucks = clean_saved.get("truck_status_db", {})
+        if st.session_state.get("truck_status_db", {}) != new_trucks:
+            st.session_state["truck_status_db"] = new_trucks
+            
+        new_cust_df = sanitize_df(pd.DataFrame(clean_saved.get("customer_db", [])))
+        if "customer_db" not in st.session_state or not new_cust_df.equals(st.session_state["customer_db"]):
+            st.session_state["customer_db"] = new_cust_df
+
+        saved_ext_by_week = clean_saved.get("ext_terminal_db_by_week", {})
+        if not saved_ext_by_week and "ext_terminal_db" in clean_saved:
+            saved_ext_by_week = {"legacy": clean_saved["ext_terminal_db"]}
+            
+        new_ext_by_week = {k: sanitize_df(pd.DataFrame(v)) for k, v in saved_ext_by_week.items()}
+        st.session_state["ext_terminal_db_by_week"] = new_ext_by_week
+            
+        new_quotas = {}
+        for k_str, v in clean_saved.get("quotas_state", {}).items():
+            parts = k_str.split("|||")
+            if len(parts) == 3:
+                new_quotas[(parts[0], parts[1], parts[2])] = v
+            elif len(parts) == 2:
+                new_quotas[("legacy", parts[0], parts[1])] = v
+                
+        if st.session_state.get("quotas_state", {}) != new_quotas:
+            st.session_state["quotas_state"] = new_quotas
+
+        st.session_state["booked_trips"] = clean_saved.get("booked_trips", [])
+        st.session_state["ext_booked_trips"] = clean_saved.get("ext_booked_trips", [])
+        st.session_state["blocked_customers"] = clean_saved.get("blocked_customers", {})
+
+def parse_time_str(t_str):
+    try:
+        parts = str(t_str).strip().split(":")
+        return round(int(parts[0]) + (int(parts[1]) if len(parts) > 1 else 0) / 60.0, 2)
+    except Exception:
+        return 2.0
+
+# ==========================================
+# INITIALISIERUNG
+# ==========================================
+if "edit_mode" not in st.session_state: 
+    st.session_state["edit_mode"] = False
+
+sync_from_db()
+
+if "customer_db" not in st.session_state or st.session_state["customer_db"].empty:
+    st.session_state["customer_db"] = sanitize_df(pd.DataFrame([
+        {"Kunde": "SIAT Urmatt", "Umlaufzeit (hh:mm)": "03:55", "1 - Sägemehl": True, "2 - Hackschnitzel": True, "3 - Rinde": False, "4 - Kappholz": False}
+    ]))
+
+# ==========================================
+# HEADER & REFRESH-STEUERUNG
+# ==========================================
+col_logo, col_head, col_date, col_status = st.columns([1.5, 4, 3, 3])
+
+with col_logo:
+    if os.path.exists("KELLERHOLZ-CMYK.png"):
+        st.image("KELLERHOLZ-CMYK.png", use_container_width=True)
+    else:
+        st.markdown("<h3 style='color:#1b5e20;'>🪵 KELLERHOLZ</h3>", unsafe_allow_html=True)
+
+with col_head:
+    st.title("Restholz-Tourenplaner")
+
+with col_date:
+    st.write("") 
+    selected_date = st.date_input("📅 Planungswoche (beliebiger Tag)", value=datetime.today().date())
+
+with col_status:
+    st.write("") 
+    edit_mode = st.toggle("✏️ Bearbeitungsmodus", value=st.session_state.get("edit_mode", False), key="edit_mode", help="Pausiert das Live-Laden.")
+    
+    if edit_mode:
+        st.warning("⏸️ Auto-refresh inaktiv")
+    else:
+        st.success("✅ Autorefresh aktiv (10s)")
+        st_autorefresh(interval=10000, limit=None, key="data_refresh")
+
+# ==========================================
+# LOGIK & HILFSVARIABLEN
+# ==========================================
+today = datetime.now().date()
+start_of_week = selected_date - timedelta(days=selected_date.weekday())
+week_dates = [start_of_week + timedelta(days=i) for i in range(5)]
+valid_date_strs = [d.strftime("%Y-%m-%d") for d in week_dates]
+
+week_str = start_of_week.strftime("%Y-%m-%d")
+
+if "ext_terminal_db_by_week" not in st.session_state:
+    st.session_state["ext_terminal_db_by_week"] = {}
+    
+if week_str not in st.session_state["ext_terminal_db_by_week"]:
+    if st.session_state["ext_terminal_db_by_week"]:
+        last_w = max(st.session_state["ext_terminal_db_by_week"].keys())
+        df_last = st.session_state["ext_terminal_db_by_week"][last_w].copy()
+        if not df_last.empty:
+            df_last["SOLL (Fuhren)"] = 0
+            df_last["IST (Erfüllt)"] = 0
+            if "Einsatztag" in df_last.columns:
+                df_last["Einsatztag"] = ""
+            if "Bemerkung / Uhrzeit" in df_last.columns:
+                df_last["Bemerkung / Uhrzeit"] = ""
+        st.session_state["ext_terminal_db_by_week"][week_str] = sanitize_df(df_last)
+    else:
+        st.session_state["ext_terminal_db_by_week"][week_str] = pd.DataFrame(columns=EXT_COL_ORDER)
+    save_persistent_data()
+
+edited_cust_db = st.session_state.customer_db
+cust_duration_map = {str(r["Kunde"]).strip(): parse_time_str(r["Umlaufzeit (hh:mm)"]) for _, r in edited_cust_db.iterrows() if str(r["Kunde"]).strip()}
+all_customer_names = [str(r["Kunde"]).strip() for _, r in edited_cust_db.iterrows() if str(r["Kunde"]).strip()]
+
+# ==========================================
+# BUNKER-FÜLLSTÄNDE
+# ==========================================
+st.subheader("🏭 Aktuelle Bunker-Füllstände (%)")
+col1, col2, col3, col4 = st.columns(4)
+
+def render_bunker(col, title, db_key):
+    with col:
+        st.markdown(f"<div style='text-align: center;'><strong>{title}</strong></div>", unsafe_allow_html=True)
+        
+        v_key = f"{db_key}_version"
+        current_val = int(st.session_state.get(db_key, 50))
+        slider_key = f"slider_{db_key}_{st.session_state.get(v_key, 0)}"
+        
+        val = st.slider(
+            label=title,
+            min_value=0,
+            max_value=100,
+            value=current_val,
+            step=10,
+            key=slider_key,
+            label_visibility="collapsed"
+        )
+        
+        if val != current_val:
+            st.session_state[db_key] = val
+            save_persistent_data()
+            st.rerun()
+            
+        display_val = int(st.session_state.get(db_key, 50))
+        
+        if display_val <= 19: 
+            st.warning("⛔ GESPERRT")
+        elif display_val >= 80: 
+            st.error("🚨 HOCH")
+        else: 
+            st.success("✅ Normal")
+
+render_bunker(col1, "1 - Sägemehl", "bunker_sm")
+render_bunker(col2, "2 - Hackschnitzel", "bunker_hs")
+render_bunker(col3, "3 - Rinde", "bunker_ri")
+render_bunker(col4, "4 - Kappholz", "bunker_kp")
+
+st.divider()
+
+# ==========================================
+# WORKSPACES (TABS)
+# ==========================================
+tab_dispo, tab_fuhrpark, tab_kontingente, tab_abholungen, tab_kunden, tab_logbuch = st.tabs([
+    "📅 Dispokalender", 
+    "🚛 Fuhrparkeinstellungen", 
+    "📋 Kontingente", 
+    "📦 Abholungen",
+    "👥 Kundendatenbank", 
+    "📜 Logbuch"
+])
+
+# ------------------------------------------
+# TAB 1: DISPOKALENDER
+# ------------------------------------------
+with tab_dispo:
+    st.markdown("### 🛠️ Manuelle Verbuchung (Eigenfuhrpark)")
+    m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
+    
+    cust_keys = list(cust_duration_map.keys()) if cust_duration_map else ["-"]
+    
+    m_kunde_raw = m_col1.selectbox("Kunde", cust_keys, key="m_kunde_sel")
+    m_prod = m_col2.selectbox("Produkt", PRODUCT_LIST, key="m_prod_sel")
+    m_date = m_col3.date_input("Datum", value=selected_date, key="m_date_sel")
+    m_truck = m_col4.selectbox("Fahrzeug", TRUCK_PRIO, key="m_truck_sel")
+    m_dauer = cust_duration_map.get(m_kunde_raw, 2.0)
+    
+    if m_col5.button("⚡ Verbuchen", use_container_width=True, type="primary") and m_kunde_raw != "-":
+        d_str_manual = m_date.strftime("%Y-%m-%d")
+        m_id = f"manual_{d_str_manual}_{m_truck}_{m_kunde_raw}_{m_prod}_{len(st.session_state.booked_trips)}"
+        st.session_state.booked_trips.append({
+            "id": m_id, "Datum": d_str_manual, "Fahrzeug": m_truck, "Zeitfenster": "Manuell",
+            "Kunde": m_kunde_raw, "Produkt": m_prod, "Menge_m3": st.session_state.truck_cap, "dauer_h": m_dauer,
+            "score": 99, "is_manual": True, "created_at": datetime.now().timestamp()
+        })
+        save_persistent_data()
+        st.success("Tour manuell verbucht!")
+        st.rerun()
+
+    st.divider()
+
+    bunker_levels = {
+        "1 - Sägemehl": int(st.session_state.get("bunker_sm", 50)),
+        "2 - Hackschnitzel": int(st.session_state.get("bunker_hs", 50)),
+        "3 - Rinde": int(st.session_state.get("bunker_ri", 50)),
+        "4 - Kappholz": int(st.session_state.get("bunker_kp", 50)),
+    }
+
+    remaining_quotas = {}
+    for (w, c, p), v in st.session_state.quotas_state.items():
+        if w == week_str:
+            already_booked = sum(1 for b in st.session_state.booked_trips if b.get("Kunde") == c and b.get("Produkt") == p and b.get("Datum") in valid_date_strs)
+            remaining_quotas[(c, p)] = max(0, v.get("soll", 0) - already_booked)
+
+    schedule_by_day = {d.strftime("%Y-%m-%d"): {t: [] for t in TRUCK_PRIO} for d in week_dates}
+    truck_used_hours = {d.strftime("%Y-%m-%d"): {t: 0.0 for t in TRUCK_PRIO} for d in week_dates}
+    truck_tour_counts = {d.strftime("%Y-%m-%d"): {t: 0 for t in TRUCK_PRIO} for d in week_dates}
+
+    for b in st.session_state.booked_trips:
+        b_date = b.get("Datum")
+        b_truck = b.get("Fahrzeug")
+        if b_date in schedule_by_day and b_truck in TRUCK_PRIO:
+            if "score" not in b: b["score"] = 99
+            schedule_by_day[b_date][b_truck].append(b)
+            truck_used_hours[b_date][b_truck] += b.get("dauer_h", 2.0)
+            truck_tour_counts[b_date][b_truck] += 1
+
+    # GLOBALEN TRACKER ERMITTELN (Nur SM/HS, absolut chronologisch inkl. Fremdfuhren)
+    last_sm_hs_tracker = None
+    all_b = st.session_state.booked_trips + st.session_state.ext_booked_trips
+    all_b_sorted = sorted(all_b, key=lambda x: x.get("created_at", 0))
+    for b in all_b_sorted:
+        p = b.get("Produkt", "")
+        if p in ["1 - Sägemehl", "2 - Hackschnitzel"]:
+            last_sm_hs_tracker = p
+
+    for d_obj in week_dates:
+        d_str = d_obj.strftime("%Y-%m-%d")
+        if d_obj < today: continue
+            
+        blocked_trucks = []
+        extra_drivers = []
+        for t in TRUCK_PRIO:
+            status = st.session_state.truck_status_db.get(d_str, {}).get(t, STATUS_VERFUEGBAR)
+            if status == STATUS_AUSFALL:
+                blocked_trucks.append(t)
+            elif status == STATUS_AUSHILFE:
+                extra_drivers.append(t)
+                
+        blocked_customers_today = st.session_state.get("blocked_customers", {}).get(d_str, [])
+
+        offene_kontingente = []
+        for (c_name, p_name), rem_qty in remaining_quotas.items():
+            if rem_qty > 0 and c_name not in blocked_customers_today:
+                dur = cust_duration_map.get(c_name, 2.0)
+                q_info = st.session_state.quotas_state.get((week_str, c_name, p_name), {})
+                offene_kontingente.append({
+                    "kunde": c_name,
+                    "produkt": p_name,
+                    "menge_fuhren": rem_qty,
+                    "dauer_h": dur,
+                    "prio": q_info.get("prio", 3),
+                    "bemerkung": q_info.get("rest", "Keine")
+                })
+
+        berechnete_touren = logistics.calculate_tours(
+            datum=d_str,
+            offene_kontingente=offene_kontingente,
+            blocked_trucks=blocked_trucks,
+            extra_drivers=extra_drivers,
+            bunker_levels=bunker_levels,
+            shift_hours=st.session_state.shift_hours,
+            truck_cap=st.session_state.truck_cap,
+            initial_used_hours=truck_used_hours[d_str],
+            initial_tour_counts=truck_tour_counts[d_str],
+            last_sm_hs=last_sm_hs_tracker
+        )
+
+        for trip in berechnete_touren:
+            t = trip["Fahrzeug"]
+            trip["id"] = f"auto_{d_str}_{t}_{len(schedule_by_day[d_str][t])}"
+            trip["Datum"] = d_str
+            schedule_by_day[d_str][t].append(trip)
+            truck_used_hours[d_str][t] += trip["dauer_h"]
+            remaining_quotas[(trip["Kunde"], trip["Produkt"])] -= 1
+
+    t_cal, t_ausw = st.tabs(["📅 Planungskalender", "📊 Wochen-Auswertung"])
+    
+    with t_cal:
+        cal_cols = st.columns(5)
+        for idx, d_obj in enumerate(week_dates):
+            d_str = d_obj.strftime("%Y-%m-%d")
+            w_day = WEEKDAYS_GERMAN[d_obj.weekday()]
+            is_past = d_obj < today
+            
+            with cal_cols[idx]:
+                header_color = "#e0e0e0" if is_past else "#f0f2f6"
+                st.markdown(f"<div class='cal-day-header' style='background-color:{header_color}'>{w_day}, {d_obj.strftime('%d.%m.')}</div>", unsafe_allow_html=True)
+                
+                for t in TRUCK_PRIO:
+                    status = st.session_state.truck_status_db.get(d_str, {}).get(t, STATUS_VERFUEGBAR)
+                    
+                    if status == STATUS_AUSFALL:
+                        st.markdown(f"**🚛 {t}** <span style='color:red;'>❌ Ausfall</span>", unsafe_allow_html=True)
+                    else:
+                        badge = "🟢" if status == STATUS_AUSHILFE else "✅"
+                        st.markdown(f"**🚛 {t}** {badge} <small>({truck_used_hours[d_str][t]:.1f}h)</small>", unsafe_allow_html=True)
                         
-            if best_fit_bonus > 0:
-                current_score += best_fit_bonus
-                current_bd.append(best_fit_reason)
+                        for trip in schedule_by_day[d_str][t]:
+                            is_man = trip.get("is_manual", False)
+                            card_class, tag_type = ("cal-card-past", "🔒") if is_past else (("cal-card-manual", "🛠️") if is_man else ("cal-card", "🤖"))
+                                
+                            score_html = ""
+                            if not is_man and "score" in trip:
+                                s_details = trip.get("score_details", "").replace("\n", "&#10;")
+                                score_html = f"<span title='{s_details}' style='float:right; background:#e8f5e9; color:#1b5e20; padding:1px 6px; border-radius:10px; font-size:0.75em; border:1px solid #c8e6c9; cursor:help;'>🎯 {trip.get('score')}</span>"
+                                
+                            st.markdown(f"<div class='{card_class}'>{score_html}<strong>{tag_type} {trip.get('Zeitfenster', '')}</strong> | <b>{trip['Kunde']}</b><br><span style='color:#444;'>📦 {trip['Produkt'].split(' - ')[1] if ' - ' in trip['Produkt'] else trip['Produkt']}</span></div>", unsafe_allow_html=True)
+                            
+                            if not is_man and not is_past:
+                                if st.button(f"📌 Fixieren", key=f"btn_book_{d_str}_{t}_{trip['id']}"):
+                                    trip["is_manual"] = True
+                                    trip["created_at"] = datetime.now().timestamp()
+                                    if trip.get('Zeitfenster') == "Manuell":
+                                        trip['Zeitfenster'] = f"Tour {truck_tour_counts[d_str][t] + 1} (Fix)"
+                                    st.session_state.booked_trips.append(trip)
+                                    save_persistent_data()
+                                    st.rerun()
+
+    with t_ausw:
+        st.markdown("### Kennzahlen zur ausgewählten Planungs-Woche")
+        
+        week_own_count = sum(1 for b in st.session_state.booked_trips if b.get("Datum") in valid_date_strs)
+        eigen_soll = sum(v.get("soll", 0) for (w, c, p), v in st.session_state.quotas_state.items() if w == week_str)
+        
+        current_ext_df = st.session_state.ext_terminal_db_by_week[week_str]
+        ext_soll = current_ext_df["SOLL (Fuhren)"].sum() if not current_ext_df.empty else 0
+        
+        week_ext_count = 0
+        for b in st.session_state.ext_booked_trips:
+            z_str = str(b.get("Zeitpunkt", ""))
+            try:
+                b_date = datetime.strptime(z_str.split(" ")[0], "%d.%m.%Y").date()
+                if start_of_week <= b_date <= (start_of_week + timedelta(days=6)):
+                    week_ext_count += 1
+            except: pass
+            
+        total_soll = eigen_soll + ext_soll
+        total_ist = week_own_count + week_ext_count
+        avg_bunker = sum(bunker_levels.values()) / 4.0
+        
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Geplante Fuhren (SOLL Gesamt)", total_soll, f"Eigen: {eigen_soll} | Fremd: {ext_soll}", delta_color="off")
+        m2.metric("Verplant / Erfüllt (IST Gesamt)", total_ist, f"Eigen: {week_own_count} | Fremd: {week_ext_count}", delta_color="off")
+        m3.metric("Erfüllungsquote", f"{(total_ist / total_soll * 100) if total_soll > 0 else 0:.1f} %")
+        m4.metric("Ø Bunkerstand (Alle Produkte)", f"{avg_bunker:.1f} %")
+        
+        st.divider()
+        st.markdown("### ⚠️ Nicht realisierbare Fuhren (Eigenfuhrpark Rückstand)")
+        
+        unrealizable = []
+        for (c, p), rem in remaining_quotas.items():
+            if rem > 0:
+                b_level = bunker_levels.get(p, 50)
+                grund = f"⛔ Bunker gesperrt ({b_level}%)" if b_level <= 19 else "⏳ Keine Kapazität / Unwirtschaftlich (< 4h)"
+                unrealizable.append({"Kunde": c, "Produkt": p, "Fehlende Fuhren": rem, "Ursache": grund})
                 
-            if truck_fits is not None:
-                score_with_tiebreaker = current_score + (cand["dauer_h"] * 0.1)
+        if unrealizable:
+            st.dataframe(pd.DataFrame(unrealizable), use_container_width=True, hide_index=True)
+        else:
+            st.success("✅ Hervorragend! Alle Wochen-Kontingente für den Eigenfuhrpark konnten auf die Fahrzeuge verteilt werden.")
+
+# ------------------------------------------
+# TAB 2: FUHRPARKEINSTELLUNGEN
+# ------------------------------------------
+with tab_fuhrpark:
+    st.subheader("Allgemeine Kapazitäten")
+    c_set1, c_set2 = st.columns(2)
+    new_shift = c_set1.number_input("Max. Schichtzeit (Std./Tag)", step=0.5, value=st.session_state.shift_hours)
+    new_cap = c_set2.number_input("Kapazität Sattelzug (m³)", step=1, value=st.session_state.truck_cap)
+    if new_shift != st.session_state.shift_hours or new_cap != st.session_state.truck_cap:
+        st.session_state.shift_hours = new_shift
+        st.session_state.truck_cap = new_cap
+        save_persistent_data()
+        
+    st.divider()
+    st.subheader("Fahrzeug-Verfügbarkeit (Wochen-Matrix)")
+    
+    truck_db = st.session_state.truck_status_db
+    day_cols = []
+    date_strs = []
+    for d_obj in week_dates:
+        d_str = d_obj.strftime("%Y-%m-%d")
+        col_name = f"{WEEKDAYS_GERMAN[d_obj.weekday()]}, {d_obj.strftime('%d.%m.')}"
+        day_cols.append(col_name)
+        date_strs.append(d_str)
+
+    matrix_rows = []
+    for t in TRUCK_PRIO:
+        row = {"Fahrzeug": t}
+        for d_str, col_name in zip(date_strs, day_cols):
+            row[col_name] = truck_db.get(d_str, {}).get(t, STATUS_VERFUEGBAR)
+        matrix_rows.append(row)
+            
+    df_truck_status = pd.DataFrame(matrix_rows)
+    
+    col_config = {"Fahrzeug": st.column_config.TextColumn("Fahrzeug", disabled=True)}
+    for col_name in day_cols:
+        col_config[col_name] = st.column_config.SelectboxColumn(col_name, options=TRUCK_STATUS_OPTIONS, width="medium")
+    
+    edited_trucks = st.data_editor(
+        df_truck_status,
+        use_container_width=True,
+        hide_index=True,
+        column_config=col_config,
+        key=f"truck_matrix_editor_{week_str}" 
+    )
+    
+    trucks_changed = False
+    for _, row in edited_trucks.iterrows():
+        t = row["Fahrzeug"]
+        for d_str, col_name in zip(date_strs, day_cols):
+            new_status = row[col_name]
+            if d_str not in truck_db: truck_db[d_str] = {}
+            if truck_db[d_str].get(t, STATUS_VERFUEGBAR) != new_status:
+                truck_db[d_str][t] = new_status
+                trucks_changed = True
                 
-                if score_with_tiebreaker > max_score:
-                    max_score = score_with_tiebreaker
-                    best_cand_idx = i
-                    best_truck = truck_fits
-                    best_breakdown_str = "\n".join(current_bd)
+    if trucks_changed:
+        st.session_state.truck_status_db = truck_db
+        save_persistent_data()
+
+# ------------------------------------------
+# TAB 3: KONTINGENTE & SPERREN
+# ------------------------------------------
+with tab_kontingente:
+    st.markdown("### 📋 Wochen-Kontingente (Eigenfuhrpark)")
+    
+    def get_default_quota(c_name, p_name):
+        best_prio = 3
+        best_rest = "Keine"
+        for (w, c, p), val in st.session_state.quotas_state.items():
+            if c == c_name and p == p_name:
+                best_prio = val.get("prio", 3)
+                best_rest = val.get("rest", "Keine")
+        return {"soll": 0, "rest": best_rest, "prio": best_prio}
+
+    booked_counts_by_cust_prod = {}
+    for b in st.session_state.booked_trips:
+        if b.get("Datum") in valid_date_strs:
+            key = (b.get("Kunde"), b.get("Produkt"))
+            booked_counts_by_cust_prod[key] = booked_counts_by_cust_prod.get(key, 0) + 1
+
+    initial_quota_rows = []
+    for p_name in PRODUCT_LIST:
+        for _, c_row in st.session_state.customer_db.iterrows():
+            c_name = str(c_row["Kunde"]).strip()
+            if not c_name: continue
+            
+            t_str = str(c_row.get("Umlaufzeit (hh:mm)", "02:00"))
+            if c_row.get(p_name, False):
+                key = (week_str, c_name, p_name)
+                prev = st.session_state.quotas_state.get(key)
+                if not prev:
+                    prev = get_default_quota(c_name, p_name)
                     
-        if best_cand_idx == -1:
-            break 
+                ist = booked_counts_by_cust_prod.get((c_name, p_name), 0)
+                
+                initial_quota_rows.append({
+                    "Produkt / Artikel": p_name,
+                    "Kunde": f"{c_name} ({t_str})",
+                    "SOLL (Geplante Fuhren)": prev["soll"],
+                    "IST (Gebucht)": ist,
+                    "Fix-Termine / Restriktionen": prev["rest"],
+                    "Priorität (1-5)": min(5, max(1, prev.get("prio", 3))),
+                    "_Produkt_Raw": p_name,
+                    "_Kunde_Raw": c_name
+                })
+
+    edited_quotas = st.data_editor(
+        pd.DataFrame(initial_quota_rows),
+        use_container_width=True,
+        num_rows="fixed",
+        disabled=["Produkt / Artikel", "Kunde", "IST (Gebucht)", "_Produkt_Raw", "_Kunde_Raw"],
+        column_config={
+            "_Produkt_Raw": None, "_Kunde_Raw": None,
+            "Produkt / Artikel": st.column_config.TextColumn("Produkt / Artikel", width="medium"),
+            "Kunde": st.column_config.TextColumn("Kunde (Umlaufzeit)", width="medium"),
+            "SOLL (Geplante Fuhren)": st.column_config.NumberColumn("SOLL", min_value=0, max_value=50, step=1),
+            "IST (Gebucht)": st.column_config.NumberColumn("IST", min_value=0, max_value=50),
+            "Fix-Termine / Restriktionen": st.column_config.TextColumn("Restriktionen", width="large"),
+            "Priorität (1-5)": st.column_config.NumberColumn("Prio", min_value=1, max_value=5, step=1)
+        },
+        hide_index=True,
+        key=f"quotas_editor_{week_str}"
+    )
+
+    quotas_changed = False
+    for _, row in edited_quotas.iterrows():
+        k = (week_str, row["_Kunde_Raw"], row["_Produkt_Raw"])
+        new_val = {"soll": int(row["SOLL (Geplante Fuhren)"]), "rest": str(row["Fix-Termine / Restriktionen"]), "prio": int(row["Priorität (1-5)"])}
+        if st.session_state.quotas_state.get(k) != new_val:
+            st.session_state.quotas_state[k] = new_val
+            quotas_changed = True
+
+    if quotas_changed:
+        save_persistent_data()
+
+    st.divider()
+    st.markdown("#### 🚫 Kundensperren / Annahmestopp")
+    
+    c_block1, c_block2 = st.columns([1, 2])
+    block_date = c_block1.date_input("Datum für Sperre auswählen:", value=selected_date, key="block_date_input")
+    block_date_str = block_date.strftime("%Y-%m-%d")
+
+    current_blocked = st.session_state.get("blocked_customers", {}).get(block_date_str, [])
+    valid_blocked = [c for c in current_blocked if c in all_customer_names]
+
+    selected_blocked_custs_ui = c_block2.multiselect(
+        f"Gesperrte Kunden am {block_date.strftime('%d.%m.%Y')}:",
+        options=all_customer_names,
+        default=valid_blocked,
+        key=f"block_cust_ui_{block_date_str}"
+    )
+
+    blocked_dict = st.session_state.get("blocked_customers", {})
+    if set(blocked_dict.get(block_date_str, [])) != set(selected_blocked_custs_ui):
+        blocked_dict[block_date_str] = selected_blocked_custs_ui
+        st.session_state["blocked_customers"] = blocked_dict
+        save_persistent_data()
+
+# ------------------------------------------
+# TAB 4: ABHOLUNGEN
+# ------------------------------------------
+with tab_abholungen:
+    st.markdown("### 🚛 Fremdspeditionen (Abholungen)")
+    
+    current_ext_df = st.session_state.ext_terminal_db_by_week[week_str]
+
+    st.markdown("#### ⚡ Schnell-Verbuchung (+1)")
+    
+    if not current_ext_df.empty:
+        col_sel, col_btn_ext = st.columns([3, 1])
+        ext_options = []
+        for idx, row in current_ext_df.iterrows():
+            prod = str(row.get("Produkt / Artikel", ""))
+            cust = str(row.get("Kunde", "")).strip() or "Unbekannt"
+            sped = str(row.get("Frachtführer / Spedition", "")).strip() or "Unbekannt"
+            ext_options.append(f"Zeile {idx+1}: {prod} ➔ {cust} ({sped}) | IST: {row.get('IST (Erfüllt)', 0)}/{row.get('SOLL (Fuhren)', 0)}")
+        
+        if ext_options:
+            selected_ext_idx_str = col_sel.selectbox("Tour zum Verbuchen auswählen:", options=ext_options, key="ext_book_select")
             
-        best_cand = candidates[best_cand_idx]
-        best_cand["offene_fuhren"] -= 1
-        truck_used_hours[best_truck] += best_cand["dauer_h"]
-        truck_tour_counts[best_truck] += 1
+            if col_btn_ext.button("📌 +1 Verbuchen", use_container_width=True):
+                row_idx = ext_options.index(selected_ext_idx_str)
+                
+                st.session_state.ext_terminal_db_by_week[week_str].at[row_idx, "IST (Erfüllt)"] += 1
+                booked_row = st.session_state.ext_terminal_db_by_week[week_str].iloc[row_idx]
+                
+                st.session_state.ext_booked_trips.append({
+                    "Zeitpunkt": datetime.now().strftime("%d.%m.%Y %H:%M"),
+                    "Produkt": booked_row.get("Produkt / Artikel"),
+                    "Kunde": booked_row.get("Kunde"),
+                    "Spedition": booked_row.get("Frachtführer / Spedition"),
+                    "Einsatztag": booked_row.get("Einsatztag") or "Keiner",
+                    "created_at": datetime.now().timestamp()
+                })
+                save_persistent_data()
+                st.success("Fremdfuhre verbucht!")
+                st.rerun()
+    else:
+        st.info("Bitte lege zuerst unten im Kasten eine Abholung an.")
+
+    st.divider()
+
+    with st.form("ext_terminal_form"):
+        st.info("💡 **Massenbearbeitung:** Tippe hier in Ruhe deine Änderungen ein. Die App speichert und synchronisiert erst, wenn du unten auf den Speichern-Button klickst.")
         
-        # WICHTIG: Sobald die Tour feststeht, aktualisieren wir den Tracker sofort!
-        if best_cand["Produkt"] in ["1 - Sägemehl", "2 - Hackschnitzel"]:
-            current_last_sm_hs = best_cand["Produkt"]
+        edited_ext_db_raw = st.data_editor(
+            current_ext_df,
+            use_container_width=True,
+            num_rows="dynamic",
+            column_order=EXT_COL_ORDER,
+            column_config={
+                "Produkt / Artikel": st.column_config.SelectboxColumn("Produkt", options=PRODUCT_LIST, default="1 - Sägemehl"),
+                "Kunde": st.column_config.TextColumn("Kunde (Freitext)", default="", required=True),
+                "Frachtführer / Spedition": st.column_config.TextColumn("Spedition", default="", required=True),
+                "SOLL (Fuhren)": st.column_config.NumberColumn("SOLL", min_value=0, max_value=100, step=1, default=0),
+                "IST (Erfüllt)": st.column_config.NumberColumn("IST", min_value=0, max_value=100, step=1, default=0),
+                "Einsatztag": st.column_config.TextColumn("Tag(e) (z.B. Montag, Dienstag)", default=""),
+            },
+            hide_index=True,
+            key=f"ext_terminal_editor_{week_str}"
+        )
         
-        trip_obj = {
-            "Tag": datum.isoformat() if isinstance(datum, (datetime.date, datetime.datetime)) else datum,
-            "Fahrzeug": best_truck,
-            "Zeitfenster": f"Tour {truck_tour_counts[best_truck]}",
-            "Kunde": best_cand["Kunde"],
-            "Produkt": best_cand["Produkt"],
-            "Menge_m3": truck_cap,
-            "dauer_h": best_cand["dauer_h"],
-            "score": int(max_score),
-            "score_details": best_breakdown_str, 
-            "is_manual": False,
-            "Bemerkung": best_cand["rest_req"]
-        }
-        berechnete_touren.append(trip_obj)
+        submitted_ext = st.form_submit_button("💾 Änderungen dauerhaft speichern", type="primary")
+
+    if submitted_ext:
+        edited_ext_db = sanitize_df(edited_ext_db_raw)
+        if not edited_ext_db.equals(current_ext_df):
+            st.session_state.ext_terminal_db_by_week[week_str] = edited_ext_db
+            save_persistent_data()
+            st.success("Tabelle erfolgreich gespeichert!")
+            st.rerun()
+
+# ------------------------------------------
+# TAB 5: KUNDENDATENBANK
+# ------------------------------------------
+with tab_kunden:
+    st.markdown("### 👥 Kundendatenbank (Stammdaten)")
+    
+    with st.form("customer_db_form"):
+        st.info("💡 **Massenbearbeitung:** Lege hier in Ruhe neue Kunden an. Die App speichert erst beim Klick auf den Button.")
         
-    final_touren = []
-    for trip in berechnete_touren:
-        t = trip["Fahrzeug"]
-        if truck_used_hours[t] >= 4.0:
-            final_touren.append(trip)
+        edited_cust_db_input_raw = st.data_editor(
+            st.session_state.customer_db,
+            num_rows="dynamic",
+            use_container_width=True,
+            column_order=["Kunde", "Umlaufzeit (hh:mm)", "1 - Sägemehl", "2 - Hackschnitzel", "3 - Rinde", "4 - Kappholz"],
+            column_config={
+                "Kunde": st.column_config.TextColumn("Kundenname", required=True),
+                "Umlaufzeit (hh:mm)": st.column_config.TextColumn("Umlaufzeit (hh:mm)", default="02:00", required=True),
+                "1 - Sägemehl": st.column_config.CheckboxColumn("Sägemehl", default=False),
+                "2 - Hackschnitzel": st.column_config.CheckboxColumn("Hackschnitzel", default=False),
+                "3 - Rinde": st.column_config.CheckboxColumn("Rinde", default=False),
+                "4 - Kappholz": st.column_config.CheckboxColumn("4 - Kappholz", default=False),
+            },
+            hide_index=True,
+            key="customer_editor_stable"
+        )
+        
+        submitted_cust = st.form_submit_button("💾 Kundendaten dauerhaft speichern", type="primary")
+
+    if submitted_cust:
+        edited_cust_db_input = sanitize_df(edited_cust_db_input_raw)
+        if not edited_cust_db_input.equals(st.session_state.customer_db):
+            st.session_state.customer_db = edited_cust_db_input
+            save_persistent_data()
+            st.success("Kundendatenbank erfolgreich aktualisiert!")
+            st.rerun()
+
+# ------------------------------------------
+# TAB 6: LOGBUCH
+# ------------------------------------------
+with tab_logbuch:
+    col_log_own, col_log_ext = st.columns(2)
+    
+    # ---------------- EIGENFUHRPARK ----------------
+    with col_log_own:
+        st.markdown("### 🚛 Eigenfuhrpark (Diese Woche)")
+        
+        week_own_trips = [b for b in st.session_state.booked_trips if b.get("Datum") in valid_date_strs]
+        
+        if week_own_trips:
+            df_booked = pd.DataFrame(week_own_trips)
+            df_booked = df_booked.sort_values(by="Datum", ascending=False)
+            st.dataframe(df_booked, use_container_width=True, hide_index=True)
             
-    return final_touren
+            st.divider()
+            c_del1, c_del2 = st.columns([3, 1])
+            selected_del_id = c_del1.selectbox("Tour stornieren:", options=[b.get("id") for b in week_own_trips if "id" in b], key="del_trip_select_box")
+            
+            if c_del2.button("❌ Löschen", use_container_width=True, type="secondary", key="del_btn_own"):
+                st.session_state.booked_trips = [b for b in st.session_state.booked_trips if b.get("id") != selected_del_id]
+                save_persistent_data()
+                st.rerun()
+        else:
+            st.info("In dieser Woche wurden noch keine Touren für den Eigenfuhrpark verbucht.")
+
+    # ---------------- FREMDFUHREN ----------------
+    with col_log_ext:
+        st.markdown("### 📦 Fremdfuhren (Diese Woche)")
+        
+        week_ext_trips = []
+        week_ext_indices = []
+        
+        for i, b in enumerate(st.session_state.ext_booked_trips):
+            z_str = str(b.get("Zeitpunkt", ""))
+            try:
+                b_date = datetime.strptime(z_str.split(" ")[0], "%d.%m.%Y").date()
+                if start_of_week <= b_date <= (start_of_week + timedelta(days=6)):
+                    week_ext_trips.append(b)
+                    week_ext_indices.append(i)
+            except Exception:
+                pass
+                
+        if week_ext_trips:
+            df_ext = pd.DataFrame(week_ext_trips)
+            df_ext = df_ext.iloc[::-1]
+            st.dataframe(df_ext, use_container_width=True, hide_index=True)
+            
+            st.divider()
+            c_del_ext1, c_del_ext2 = st.columns([3, 1])
+            
+            ext_del_options = [f"{orig_idx} | {st.session_state.ext_booked_trips[orig_idx].get('Zeitpunkt')} - {st.session_state.ext_booked_trips[orig_idx].get('Kunde')}" for orig_idx in week_ext_indices]
+            
+            selected_del_ext_str = c_del_ext1.selectbox("Fremdfuhre stornieren:", options=ext_del_options, key="del_ext_select_box")
+            
+            if c_del_ext2.button("❌ Löschen", use_container_width=True, type="secondary", key="del_btn_ext"):
+                idx_to_del = int(selected_del_ext_str.split(" | ")[0])
+                deleted_trip = st.session_state.ext_booked_trips.pop(idx_to_del)
+                
+                ext_df = st.session_state.ext_terminal_db_by_week[week_str]
+                for idx, row in ext_df.iterrows():
+                    if (row.get("Produkt / Artikel") == deleted_trip.get("Produkt") and 
+                        row.get("Kunde") == deleted_trip.get("Kunde") and 
+                        row.get("Frachtführer / Spedition") == deleted_trip.get("Spedition")):
+                        
+                        if ext_df.at[idx, "IST (Erfüllt)"] > 0:
+                            ext_df.at[idx, "IST (Erfüllt)"] -= 1
+                        break
+                        
+                st.session_state.ext_terminal_db_by_week[week_str] = ext_df
+                save_persistent_data()
+                st.rerun()
+        else:
+            st.info("In dieser Woche wurden noch keine Fremdfuhren verbucht.")

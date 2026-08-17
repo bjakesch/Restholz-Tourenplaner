@@ -78,6 +78,14 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
         
     combined_sm_hs = bunker_levels.get("1 - Sägemehl", 50) + bunker_levels.get("2 - Hackschnitzel", 50)
     
+    # Ermittle global, welches Produkt den Bonus verdient hat (basierend auf echter Logbuch-Historie)
+    bonus_product = None
+    if last_sm_hs == "1 - Sägemehl":
+        bonus_product = "2 - Hackschnitzel"
+    elif last_sm_hs == "2 - Hackschnitzel":
+        bonus_product = "1 - Sägemehl"
+    
+    # 1. Kandidaten aufbauen (mit Basis-Erklärung)
     candidates = []
     for kontingent in offene_kontingente:
         p_name = kontingent.get("produkt")
@@ -90,6 +98,12 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
                 combined_sm_hs=combined_sm_hs, 
                 dauer_h=kontingent.get("dauer_h", 2.0)
             )
+            
+            # STARRER GLOBAL-BONUS FÜR ALLE OFFENEN KONTINGENTE DIESES PRODUKTS
+            if p_name == bonus_product:
+                base_score += 20
+                breakdown.append(f"Wechselbonus (Letzte echte Buchung fordert {p_name}): +20")
+                
             candidates.append({
                 "Kunde": kontingent.get("kunde"),
                 "Produkt": p_name,
@@ -102,9 +116,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
             
     berechnete_touren = []
     
-    # Der Bonus ist STATISCH für diese Planungsrunde!
-    current_last_sm_hs = last_sm_hs
-    
+    # 2. Dynamische Verteilung
     while True:
         best_cand_idx = -1
         best_truck = None
@@ -117,16 +129,8 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
                 
             current_score = cand["base_score"]
             current_bd = cand["breakdown"].copy()
-            p_name = cand["Produkt"]
             
-            # Globaler Bonus für Produktwechsel (Nur auf Basis der ECHTEN letzten Buchung)
-            if current_last_sm_hs == "1 - Sägemehl" and p_name == "2 - Hackschnitzel":
-                current_score += 20
-                current_bd.append("Bonus (letzte echte Buchung war Säge): +20")
-            elif current_last_sm_hs == "2 - Hackschnitzel" and p_name == "1 - Sägemehl":
-                current_score += 20
-                current_bd.append("Bonus (letzte echte Buchung war Hack): +20")
-                
+            # Finde den am besten passenden LKW (Tetris-Logik)
             truck_fits = None
             best_fit_bonus = 0
             best_fit_reason = ""
@@ -135,6 +139,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
                 restzeit = truck_max_hours[t] - truck_used_hours[t]
                 
                 if cand["dauer_h"] <= restzeit + 0.1:
+                    # Lückenfüller-Bonus
                     if truck_used_hours[t] > 6.0:
                         luecke = restzeit - cand["dauer_h"]
                         if luecke >= -0.1 and luecke <= 1.0:
@@ -151,6 +156,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
                 current_score += best_fit_bonus
                 current_bd.append(best_fit_reason)
                 
+            # Tie-Breaker: Längere Dauer bevorzugen
             if truck_fits is not None:
                 score_with_tiebreaker = current_score + (cand["dauer_h"] * 0.1)
                 
@@ -163,6 +169,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
         if best_cand_idx == -1:
             break 
             
+        # 3. Bestes Match verplanen
         best_cand = candidates[best_cand_idx]
         best_cand["offene_fuhren"] -= 1
         truck_used_hours[best_truck] += best_cand["dauer_h"]
@@ -183,6 +190,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
         }
         berechnete_touren.append(trip_obj)
         
+    # 4. WIRTSCHAFTLICHKEITSPRÜFUNG (< 4.0h)
     final_touren = []
     for trip in berechnete_touren:
         t = trip["Fahrzeug"]

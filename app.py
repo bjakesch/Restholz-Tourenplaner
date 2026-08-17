@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import json
 from datetime import datetime, timedelta, date
 
 from streamlit_autorefresh import st_autorefresh
@@ -40,7 +41,28 @@ STATUS_AUSHILFE = "🟢 Aushilfe (17-21)"
 TRUCK_STATUS_OPTIONS = [STATUS_VERFUEGBAR, STATUS_AUSFALL, STATUS_AUSHILFE]
 
 # ==========================================
-# DATENBANK FUNKTIONEN
+# DATENSCHUTZ (SANITIZER FÜR LEERE ZEILEN)
+# ==========================================
+def sanitize_df(df):
+    """
+    Diese Funktion bügelt alle Fehler bei leeren/neuen Zeilen (NaN/None) glatt,
+    bevor sie verglichen oder in der Datenbank gespeichert werden.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame(columns=df.columns) if df is not None else pd.DataFrame()
+        
+    df = df.copy()
+    for col in df.columns:
+        if col in ["SOLL (Fuhren)", "IST (Erfüllt)"]:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+        elif col in ["1 - Sägemehl", "2 - Hackschnitzel", "3 - Rinde", "4 - Kappholz"]:
+            df[col] = df[col].fillna(False).astype(bool)
+        else:
+            df[col] = df[col].fillna("").astype(str)
+    return df
+
+# ==========================================
+# DATEN-SYNCHRONISIERUNG
 # ==========================================
 def load_persistent_data():
     return db.load_app_state()
@@ -63,53 +85,75 @@ def save_persistent_data():
         "booked_trips": st.session_state.get("booked_trips", []),
         "ext_booked_trips": st.session_state.get("ext_booked_trips", [])
     }
-    db.save_app_state(data)
+    
+    try:
+        clean_data = json.loads(json.dumps(data, default=str))
+    except Exception:
+        clean_data = data
+        
+    db.save_app_state(clean_data)
+    st.session_state["last_db_state"] = clean_data
 
 def sync_from_db():
-    """Lädt Daten aus der DB in den Session-State (wird nur vom Timer aufgerufen)"""
-    if st.session_state.get("edit_mode", False):
-        return
+    if not st.session_state.get("edit_mode", False):
+        saved = load_persistent_data()
+        if not saved: return
         
-    saved = load_persistent_data()
-    if not saved: return
-    
-    b_saved = saved.get("bunkers", {})
-    for k in ["bunker_sm", "bunker_hs", "bunker_ri", "bunker_kp"]:
-        remote_val = b_saved.get(k, 50)
-        local_val = st.session_state.get(k, 50)
-        if int(remote_val) != int(local_val):
-            st.session_state[k] = int(remote_val)
-            v_key = f"{k}_version"
-            st.session_state[v_key] = st.session_state.get(v_key, 0) + 1
-                
-    for k in ["shift_hours", "truck_cap"]:
-        r_val = saved.get(k)
-        if r_val is not None and st.session_state.get(k) != r_val:
-            st.session_state[k] = r_val
+        try:
+            clean_saved = json.loads(json.dumps(saved, default=str))
+        except Exception:
+            clean_saved = saved
             
-    st.session_state["truck_status_db"] = saved.get("truck_status_db", {})
+        if st.session_state.get("last_db_state") == clean_saved:
+            return 
+            
+        st.session_state["last_db_state"] = clean_saved
         
-    new_cust_df = pd.DataFrame(saved.get("customer_db", []))
-    if "customer_db" not in st.session_state or not new_cust_df.equals(st.session_state["customer_db"]):
-        st.session_state["customer_db"] = new_cust_df
+        b_saved = clean_saved.get("bunkers", {})
+        for k in ["bunker_sm", "bunker_hs", "bunker_ri", "bunker_kp"]:
+            remote_val = b_saved.get(k, 50)
+            local_val = st.session_state.get(k, 50)
+            if int(remote_val) != int(local_val):
+                st.session_state[k] = int(remote_val)
+                v_key = f"{k}_version"
+                st.session_state[v_key] = st.session_state.get(v_key, 0) + 1
+                    
+        for k in ["shift_hours", "truck_cap"]:
+            r_val = clean_saved.get(k)
+            if r_val is not None and st.session_state.get(k) != r_val:
+                st.session_state[k] = r_val
+                
+        new_trucks = clean_saved.get("truck_status_db", {})
+        if st.session_state.get("truck_status_db", {}) != new_trucks:
+            st.session_state["truck_status_db"] = new_trucks
+            
+        # SANITIZER BEIM LADEN ANWENDEN
+        new_cust_df = sanitize_df(pd.DataFrame(clean_saved.get("customer_db", [])))
+        if "customer_db" not in st.session_state or not new_cust_df.equals(st.session_state["customer_db"]):
+            st.session_state["customer_db"] = new_cust_df
 
-    saved_ext_by_week = saved.get("ext_terminal_db_by_week", {})
-    if not saved_ext_by_week and "ext_terminal_db" in saved:
-        saved_ext_by_week = {"legacy": saved["ext_terminal_db"]}
-    st.session_state["ext_terminal_db_by_week"] = {k: pd.DataFrame(v) for k, v in saved_ext_by_week.items()}
-        
-    new_quotas = {}
-    for k_str, v in saved.get("quotas_state", {}).items():
-        parts = k_str.split("|||")
-        if len(parts) == 3:
-            new_quotas[(parts[0], parts[1], parts[2])] = v
-        elif len(parts) == 2:
-            new_quotas[("legacy", parts[0], parts[1])] = v
-    st.session_state["quotas_state"] = new_quotas
+        saved_ext_by_week = clean_saved.get("ext_terminal_db_by_week", {})
+        if not saved_ext_by_week and "ext_terminal_db" in clean_saved:
+            saved_ext_by_week = {"legacy": clean_saved["ext_terminal_db"]}
+            
+        # SANITIZER BEIM LADEN ANWENDEN
+        new_ext_by_week = {k: sanitize_df(pd.DataFrame(v)) for k, v in saved_ext_by_week.items()}
+        st.session_state["ext_terminal_db_by_week"] = new_ext_by_week
+            
+        new_quotas = {}
+        for k_str, v in clean_saved.get("quotas_state", {}).items():
+            parts = k_str.split("|||")
+            if len(parts) == 3:
+                new_quotas[(parts[0], parts[1], parts[2])] = v
+            elif len(parts) == 2:
+                new_quotas[("legacy", parts[0], parts[1])] = v
+                
+        if st.session_state.get("quotas_state", {}) != new_quotas:
+            st.session_state["quotas_state"] = new_quotas
 
-    st.session_state["booked_trips"] = saved.get("booked_trips", [])
-    st.session_state["ext_booked_trips"] = saved.get("ext_booked_trips", [])
-    st.session_state["blocked_customers"] = saved.get("blocked_customers", {})
+        st.session_state["booked_trips"] = clean_saved.get("booked_trips", [])
+        st.session_state["ext_booked_trips"] = clean_saved.get("ext_booked_trips", [])
+        st.session_state["blocked_customers"] = clean_saved.get("blocked_customers", {})
 
 def parse_time_str(t_str):
     try:
@@ -119,31 +163,17 @@ def parse_time_str(t_str):
         return 2.0
 
 # ==========================================
-# SMART-SYNC (DOUBLE-ENTRY BUG FIX)
+# INITIALISIERUNG
 # ==========================================
 if "edit_mode" not in st.session_state: 
     st.session_state["edit_mode"] = False
 
-if "last_refresh_count" not in st.session_state:
-    st.session_state["last_refresh_count"] = -1
+sync_from_db()
 
-# Wir prüfen, wer das Neuladen der App ausgelöst hat: Der Nutzer oder der Timer?
-current_refresh_count = st.session_state.get("data_refresh", 0)
-is_timer_tick = current_refresh_count > st.session_state["last_refresh_count"]
-is_initial_load = "app_loaded" not in st.session_state
-
-# Wir synchronisieren NUR, wenn die App frisch startet oder der 10-Sek-Timer abgelaufen ist.
-# Wenn DU in eine Tabelle tippst, ändert sich der Zähler nicht -> Sync wird übersprungen!
-if is_timer_tick or is_initial_load:
-    sync_from_db()
-    st.session_state["last_refresh_count"] = current_refresh_count
-    st.session_state["app_loaded"] = True
-
-# Fallback für leere Datenbanken
 if "customer_db" not in st.session_state or st.session_state["customer_db"].empty:
-    st.session_state["customer_db"] = pd.DataFrame([
+    st.session_state["customer_db"] = sanitize_df(pd.DataFrame([
         {"Kunde": "SIAT Urmatt", "Umlaufzeit (hh:mm)": "03:55", "1 - Sägemehl": True, "2 - Hackschnitzel": True, "3 - Rinde": False, "4 - Kappholz": False}
-    ])
+    ]))
 
 # ==========================================
 # HEADER & REFRESH-STEUERUNG
@@ -171,7 +201,6 @@ with col_status:
         st.warning("⏸️ Auto-refresh inaktiv")
     else:
         st.success("✅ Autorefresh aktiv (10s)")
-        # Dieser Timer aktualisiert den Zähler im session_state ("data_refresh")
         st_autorefresh(interval=10000, limit=None, key="data_refresh")
 
 # ==========================================
@@ -198,7 +227,7 @@ if week_str not in st.session_state["ext_terminal_db_by_week"]:
                 df_last["Einsatztag"] = ""
             if "Bemerkung / Uhrzeit" in df_last.columns:
                 df_last["Bemerkung / Uhrzeit"] = ""
-        st.session_state["ext_terminal_db_by_week"][week_str] = df_last
+        st.session_state["ext_terminal_db_by_week"][week_str] = sanitize_df(df_last)
     else:
         st.session_state["ext_terminal_db_by_week"][week_str] = pd.DataFrame(columns=EXT_COL_ORDER)
     save_persistent_data()
@@ -497,7 +526,6 @@ with tab_fuhrpark:
     for col_name in day_cols:
         col_config[col_name] = st.column_config.SelectboxColumn(col_name, options=TRUCK_STATUS_OPTIONS, width="medium")
     
-    # STABILER KEY: Kein Versions-Anhängsel, Tabellen bleiben ruhig stehen
     edited_trucks = st.data_editor(
         df_truck_status,
         use_container_width=True,
@@ -567,7 +595,6 @@ with tab_kontingente:
                     "_Kunde_Raw": c_name
                 })
 
-    # STABILER KEY: Kein Versions-Anhängsel
     edited_quotas = st.data_editor(
         pd.DataFrame(initial_quota_rows),
         use_container_width=True,
@@ -628,8 +655,8 @@ with tab_abholungen:
     
     current_ext_df = st.session_state.ext_terminal_db_by_week[week_str]
 
-    # STABILER KEY + COLUMN ORDER SICHERUNG
-    edited_ext_db = st.data_editor(
+    # RAW-Daten aus dem Editor abfangen und sofort durch den Sanitizer jagen!
+    edited_ext_db_raw = st.data_editor(
         current_ext_df,
         use_container_width=True,
         num_rows="dynamic",
@@ -646,6 +673,8 @@ with tab_abholungen:
         key=f"ext_terminal_editor_{week_str}"
     )
 
+    edited_ext_db = sanitize_df(edited_ext_db_raw)
+
     if not edited_ext_db.equals(current_ext_df):
         st.session_state.ext_terminal_db_by_week[week_str] = edited_ext_db
         save_persistent_data()
@@ -659,24 +688,25 @@ with tab_abholungen:
             sped = str(row.get("Frachtführer / Spedition", "")).strip() or "Unbekannt"
             ext_options.append(f"Zeile {idx+1}: {prod} ➔ {cust} ({sped}) | IST: {row.get('IST (Erfüllt)', 0)}/{row.get('SOLL (Fuhren)', 0)}")
         
-        selected_ext_idx_str = col_sel.selectbox("Tour zum Verbuchen auswählen:", options=ext_options, key="ext_book_select")
-        
-        if col_btn_ext.button("📌 +1 Verbuchen", use_container_width=True, type="primary"):
-            row_idx = ext_options.index(selected_ext_idx_str)
+        if ext_options:
+            selected_ext_idx_str = col_sel.selectbox("Tour zum Verbuchen auswählen:", options=ext_options, key="ext_book_select")
             
-            st.session_state.ext_terminal_db_by_week[week_str].at[row_idx, "IST (Erfüllt)"] += 1
-            booked_row = st.session_state.ext_terminal_db_by_week[week_str].iloc[row_idx]
-            
-            st.session_state.ext_booked_trips.append({
-                "Zeitpunkt": datetime.now().strftime("%d.%m.%Y %H:%M"),
-                "Produkt": booked_row.get("Produkt / Artikel"),
-                "Kunde": booked_row.get("Kunde"),
-                "Spedition": booked_row.get("Frachtführer / Spedition"),
-                "Einsatztag": booked_row.get("Einsatztag") or "Keiner"
-            })
-            save_persistent_data()
-            st.success("Fremdfuhre verbucht!")
-            st.rerun()
+            if col_btn_ext.button("📌 +1 Verbuchen", use_container_width=True, type="primary"):
+                row_idx = ext_options.index(selected_ext_idx_str)
+                
+                st.session_state.ext_terminal_db_by_week[week_str].at[row_idx, "IST (Erfüllt)"] += 1
+                booked_row = st.session_state.ext_terminal_db_by_week[week_str].iloc[row_idx]
+                
+                st.session_state.ext_booked_trips.append({
+                    "Zeitpunkt": datetime.now().strftime("%d.%m.%Y %H:%M"),
+                    "Produkt": booked_row.get("Produkt / Artikel"),
+                    "Kunde": booked_row.get("Kunde"),
+                    "Spedition": booked_row.get("Frachtführer / Spedition"),
+                    "Einsatztag": booked_row.get("Einsatztag") or "Keiner"
+                })
+                save_persistent_data()
+                st.success("Fremdfuhre verbucht!")
+                st.rerun()
 
 # ------------------------------------------
 # TAB 5: KUNDENDATENBANK
@@ -684,8 +714,8 @@ with tab_abholungen:
 with tab_kunden:
     st.markdown("### 👥 Kundendatenbank (Stammdaten)")
     
-    # STABILER KEY
-    edited_cust_db_input = st.data_editor(
+    # RAW-Daten abfangen und direkt sanitizen
+    edited_cust_db_input_raw = st.data_editor(
         st.session_state.customer_db,
         num_rows="dynamic",
         use_container_width=True,
@@ -701,6 +731,9 @@ with tab_kunden:
         hide_index=True,
         key="customer_editor_stable"
     )
+    
+    edited_cust_db_input = sanitize_df(edited_cust_db_input_raw)
+    
     if not edited_cust_db_input.equals(st.session_state.customer_db):
         st.session_state.customer_db = edited_cust_db_input
         save_persistent_data()

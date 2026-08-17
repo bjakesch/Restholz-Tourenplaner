@@ -655,40 +655,7 @@ with tab_abholungen:
     
     current_ext_df = st.session_state.ext_terminal_db_by_week[week_str]
 
-    # 1. BEREICH: MASSENBEARBEITUNG IN EINEM FORMULAR
-    with st.form("ext_terminal_form"):
-        st.info("💡 **Massenbearbeitung:** Tippe hier in Ruhe deine Änderungen ein. Die App speichert und synchronisiert erst, wenn du unten auf den Speichern-Button klickst.")
-        
-        edited_ext_db_raw = st.data_editor(
-            current_ext_df,
-            use_container_width=True,
-            num_rows="dynamic",
-            column_order=EXT_COL_ORDER,
-            column_config={
-                "Produkt / Artikel": st.column_config.SelectboxColumn("Produkt", options=PRODUCT_LIST, default="1 - Sägemehl"),
-                "Kunde": st.column_config.TextColumn("Kunde (Freitext)", default="", required=True),
-                "Frachtführer / Spedition": st.column_config.TextColumn("Spedition", default="", required=True),
-                "SOLL (Fuhren)": st.column_config.NumberColumn("SOLL", min_value=0, max_value=100, step=1, default=0),
-                "IST (Erfüllt)": st.column_config.NumberColumn("IST", min_value=0, max_value=100, step=1, default=0),
-                "Einsatztag": st.column_config.TextColumn("Tag(e) (z.B. Montag, Dienstag)", default=""),
-            },
-            hide_index=True,
-            key=f"ext_terminal_editor_{week_str}"
-        )
-        
-        submitted_ext = st.form_submit_button("💾 Änderungen dauerhaft speichern", type="primary")
-
-    if submitted_ext:
-        edited_ext_db = sanitize_df(edited_ext_db_raw)
-        if not edited_ext_db.equals(current_ext_df):
-            st.session_state.ext_terminal_db_by_week[week_str] = edited_ext_db
-            save_persistent_data()
-            st.success("Tabelle erfolgreich gespeichert!")
-            st.rerun()
-
-    st.divider()
-    
-    # 2. BEREICH: SCHNELL-VERBUCHUNG 
+    # 1. BEREICH: SCHNELL-VERBUCHUNG (Jetzt oben!)
     st.markdown("#### ⚡ Schnell-Verbuchung (+1)")
     
     if not current_ext_df.empty:
@@ -720,7 +687,40 @@ with tab_abholungen:
                 st.success("Fremdfuhre verbucht!")
                 st.rerun()
     else:
-        st.info("Bitte lege zuerst oben im Kasten eine Abholung an.")
+        st.info("Bitte lege zuerst unten im Kasten eine Abholung an.")
+
+    st.divider()
+
+    # 2. BEREICH: MASSENBEARBEITUNG IN EINEM FORMULAR (Jetzt unten!)
+    with st.form("ext_terminal_form"):
+        st.info("💡 **Massenbearbeitung:** Tippe hier in Ruhe deine Änderungen ein. Die App speichert und synchronisiert erst, wenn du unten auf den Speichern-Button klickst.")
+        
+        edited_ext_db_raw = st.data_editor(
+            current_ext_df,
+            use_container_width=True,
+            num_rows="dynamic",
+            column_order=EXT_COL_ORDER,
+            column_config={
+                "Produkt / Artikel": st.column_config.SelectboxColumn("Produkt", options=PRODUCT_LIST, default="1 - Sägemehl"),
+                "Kunde": st.column_config.TextColumn("Kunde (Freitext)", default="", required=True),
+                "Frachtführer / Spedition": st.column_config.TextColumn("Spedition", default="", required=True),
+                "SOLL (Fuhren)": st.column_config.NumberColumn("SOLL", min_value=0, max_value=100, step=1, default=0),
+                "IST (Erfüllt)": st.column_config.NumberColumn("IST", min_value=0, max_value=100, step=1, default=0),
+                "Einsatztag": st.column_config.TextColumn("Tag(e) (z.B. Montag, Dienstag)", default=""),
+            },
+            hide_index=True,
+            key=f"ext_terminal_editor_{week_str}"
+        )
+        
+        submitted_ext = st.form_submit_button("💾 Änderungen dauerhaft speichern", type="primary")
+
+    if submitted_ext:
+        edited_ext_db = sanitize_df(edited_ext_db_raw)
+        if not edited_ext_db.equals(current_ext_df):
+            st.session_state.ext_terminal_db_by_week[week_str] = edited_ext_db
+            save_persistent_data()
+            st.success("Tabelle erfolgreich gespeichert!")
+            st.rerun()
 
 # ------------------------------------------
 # TAB 5: KUNDENDATENBANK

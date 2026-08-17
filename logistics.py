@@ -24,17 +24,26 @@ def calculate_base_score(prio, bunker_level, combined_sm_hs, dauer_h):
         score += 30  
         breakdown.append(f"Bunker kritisch ({bunker_level}%): +30")
         
+    # Neues halbstündiges Raster für volle Lager
     if combined_sm_hs > 130:
         if dauer_h < 2.5:
             score += 50
             breakdown.append("Lager >130% & Kurztour (<2.5h): +50")
+        elif dauer_h < 3.0:
+            score += 40
+            breakdown.append("Lager >130% & Kurztour (<3.0h): +40")
         elif dauer_h < 3.5:
             score += 30
             breakdown.append("Lager >130% & Kurztour (<3.5h): +30")
+            
+    # Neues halbstündiges Raster für leere Lager (Zeit schinden)
     elif combined_sm_hs < 60:
         if dauer_h > 3.5:
             score += 50
             breakdown.append("Lager <60% & Langtour (>3.5h): +50")
+        elif dauer_h > 3.0:
+            score += 40
+            breakdown.append("Lager <60% & Langtour (>3.0h): +40")
         elif dauer_h > 2.5:
             score += 30
             breakdown.append("Lager <60% & Langtour (>2.5h): +30")
@@ -132,11 +141,8 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
                 if cand["dauer_h"] <= restzeit + 0.1:
                     
                     # Lückenfüller-Logik (Kapazitäts-Bonus)
-                    # Wenn der LKW schon ziemlich voll ist (z.B. > 6 Stunden verplant)
-                    # und die Tour sehr gut in die verbleibende Lücke passt
                     if truck_used_hours[t] > 6.0:
                         luecke = restzeit - cand["dauer_h"]
-                        # Wenn die Tour die Lücke fast perfekt füllt (weniger als 1 Stunde Rest)
                         if luecke >= -0.1 and luecke <= 1.0:
                             temp_bonus = 40  # Hoher Bonus für perfekte Lückenfüller
                             if temp_bonus > best_fit_bonus:
@@ -154,10 +160,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
                 current_bd.append(best_fit_reason)
                 
             # Tie-Breaker: Bei gleichem Score die LÄNGERE Tour bevorzugen
-            # (Das ist die LPT-Heuristik "Dicke Brocken zuerst")
             if truck_fits is not None:
-                # Wir geben einen minimalen Bonus (Nachkommastelle) für die Dauer
-                # So bleibt die Haupt-Priorität erhalten, aber bei Gleichstand gewinnt die lange Tour
                 score_with_tiebreaker = current_score + (cand["dauer_h"] * 0.1)
                 
                 if score_with_tiebreaker > max_score:
@@ -184,7 +187,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
             "Produkt": best_cand["Produkt"],
             "Menge_m3": truck_cap,
             "dauer_h": best_cand["dauer_h"],
-            "score": int(max_score), # Runden für die Anzeige
+            "score": int(max_score),
             "score_details": best_breakdown_str, 
             "is_manual": False,
             "Bemerkung": best_cand["rest_req"]

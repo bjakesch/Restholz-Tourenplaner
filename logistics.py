@@ -97,7 +97,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
     berechnete_touren = []
     current_last_product = last_booked_product
     
-    # 2. Dynamische Verteilung
+    # 2. Dynamische Verteilung (Hybrid: Prio + Kapazität)
     while True:
         best_cand_idx = -1
         best_truck = None
@@ -112,6 +112,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
             current_bd = cand["breakdown"].copy()
             p_name = cand["Produkt"]
             
+            # Bonus für Produktwechsel
             if current_last_product == "1 - Sägemehl" and p_name == "2 - Hackschnitzel":
                 current_score += 20
                 current_bd.append("Wechsel Säge->Hack: +20")
@@ -119,15 +120,48 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
                 current_score += 20
                 current_bd.append("Wechsel Hack->Säge: +20")
                 
+            # Finde den am besten passenden LKW
             truck_fits = None
+            best_fit_bonus = 0
+            best_fit_reason = ""
+            
             for t in active_trucks:
-                if truck_used_hours[t] + cand["dauer_h"] <= truck_max_hours[t] + 0.1:
-                    truck_fits = t
-                    break
+                restzeit = truck_max_hours[t] - truck_used_hours[t]
+                
+                # Passt die Tour überhaupt noch rein? (+ 0.1h Toleranz)
+                if cand["dauer_h"] <= restzeit + 0.1:
                     
+                    # Lückenfüller-Logik (Kapazitäts-Bonus)
+                    # Wenn der LKW schon ziemlich voll ist (z.B. > 6 Stunden verplant)
+                    # und die Tour sehr gut in die verbleibende Lücke passt
+                    if truck_used_hours[t] > 6.0:
+                        luecke = restzeit - cand["dauer_h"]
+                        # Wenn die Tour die Lücke fast perfekt füllt (weniger als 1 Stunde Rest)
+                        if luecke >= -0.1 and luecke <= 1.0:
+                            temp_bonus = 40  # Hoher Bonus für perfekte Lückenfüller
+                            if temp_bonus > best_fit_bonus:
+                                best_fit_bonus = temp_bonus
+                                truck_fits = t
+                                best_fit_reason = f"Lückenfüller (Restzeit {restzeit:.1f}h): +40"
+                    
+                    # Wenn noch kein LKW mit Bonus gefunden wurde, nimm den ersten, der passt
+                    if truck_fits is None:
+                        truck_fits = t
+                        
+            # Den Bonus zum Score addieren
+            if best_fit_bonus > 0:
+                current_score += best_fit_bonus
+                current_bd.append(best_fit_reason)
+                
+            # Tie-Breaker: Bei gleichem Score die LÄNGERE Tour bevorzugen
+            # (Das ist die LPT-Heuristik "Dicke Brocken zuerst")
             if truck_fits is not None:
-                if current_score > max_score:
-                    max_score = current_score
+                # Wir geben einen minimalen Bonus (Nachkommastelle) für die Dauer
+                # So bleibt die Haupt-Priorität erhalten, aber bei Gleichstand gewinnt die lange Tour
+                score_with_tiebreaker = current_score + (cand["dauer_h"] * 0.1)
+                
+                if score_with_tiebreaker > max_score:
+                    max_score = score_with_tiebreaker
                     best_cand_idx = i
                     best_truck = truck_fits
                     best_breakdown_str = "\n".join(current_bd)
@@ -150,7 +184,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
             "Produkt": best_cand["Produkt"],
             "Menge_m3": truck_cap,
             "dauer_h": best_cand["dauer_h"],
-            "score": max_score,
+            "score": int(max_score), # Runden für die Anzeige
             "score_details": best_breakdown_str, 
             "is_manual": False,
             "Bemerkung": best_cand["rest_req"]
@@ -158,7 +192,6 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
         berechnete_touren.append(trip_obj)
         
     # 4. WIRTSCHAFTLICHKEITSPRÜFUNG (< 4.0h)
-    # LKW, die am Ende des Tages weniger als 4 Stunden Auslastung haben, werden komplett entladen.
     final_touren = []
     for trip in berechnete_touren:
         t = trip["Fahrzeug"]

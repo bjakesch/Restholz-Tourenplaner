@@ -24,7 +24,6 @@ def calculate_base_score(prio, bunker_level, combined_sm_hs, dauer_h):
         score += 30  
         breakdown.append(f"Bunker kritisch ({bunker_level}%): +30")
         
-    # Neues halbstündiges Raster für volle Lager
     if combined_sm_hs > 130:
         if dauer_h < 2.5:
             score += 50
@@ -36,7 +35,6 @@ def calculate_base_score(prio, bunker_level, combined_sm_hs, dauer_h):
             score += 30
             breakdown.append("Lager >130% & Kurztour (<3.5h): +30")
             
-    # Neues halbstündiges Raster für leere Lager (Zeit schinden)
     elif combined_sm_hs < 60:
         if dauer_h > 3.5:
             score += 50
@@ -61,7 +59,7 @@ def format_hours(hours_float):
 # ==========================================
 # HAUPT-ALGORITHMUS ZUR TOURENPLANUNG
 # ==========================================
-def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_drivers=None, bunker_levels=None, shift_hours=STANDARD_SHIFT_HOURS, truck_cap=STANDARD_TRUCK_CAP, initial_used_hours=None, initial_tour_counts=None, last_booked_product=None):
+def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_drivers=None, bunker_levels=None, shift_hours=STANDARD_SHIFT_HOURS, truck_cap=STANDARD_TRUCK_CAP, initial_used_hours=None, initial_tour_counts=None, last_sm_hs=None):
     if blocked_trucks is None: blocked_trucks = []
     if extra_drivers is None: extra_drivers = []
     if bunker_levels is None: bunker_levels = {"1 - Sägemehl": 50, "2 - Hackschnitzel": 50, "3 - Rinde": 50, "4 - Kappholz": 50}
@@ -104,9 +102,11 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
             })
             
     berechnete_touren = []
-    current_last_product = last_booked_product
     
-    # 2. Dynamische Verteilung (Hybrid: Prio + Kapazität)
+    # Hier merken wir uns global NUR Hackschnitzel und Sägemehl!
+    current_last_sm_hs = last_sm_hs
+    
+    # 2. Dynamische Verteilung
     while True:
         best_cand_idx = -1
         best_truck = None
@@ -121,11 +121,11 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
             current_bd = cand["breakdown"].copy()
             p_name = cand["Produkt"]
             
-            # Bonus für Produktwechsel
-            if current_last_product == "1 - Sägemehl" and p_name == "2 - Hackschnitzel":
+            # Globaler Bonus für Produktwechsel (Rinde/Kappholz werden völlig ignoriert)
+            if current_last_sm_hs == "1 - Sägemehl" and p_name == "2 - Hackschnitzel":
                 current_score += 20
                 current_bd.append("Wechsel Säge->Hack: +20")
-            elif current_last_product == "2 - Hackschnitzel" and p_name == "1 - Sägemehl":
+            elif current_last_sm_hs == "2 - Hackschnitzel" and p_name == "1 - Sägemehl":
                 current_score += 20
                 current_bd.append("Wechsel Hack->Säge: +20")
                 
@@ -137,24 +137,20 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
             for t in active_trucks:
                 restzeit = truck_max_hours[t] - truck_used_hours[t]
                 
-                # Passt die Tour überhaupt noch rein? (+ 0.1h Toleranz)
                 if cand["dauer_h"] <= restzeit + 0.1:
-                    
-                    # Lückenfüller-Logik (Kapazitäts-Bonus)
+                    # Lückenfüller-Logik
                     if truck_used_hours[t] > 6.0:
                         luecke = restzeit - cand["dauer_h"]
                         if luecke >= -0.1 and luecke <= 1.0:
-                            temp_bonus = 40  # Hoher Bonus für perfekte Lückenfüller
+                            temp_bonus = 40 
                             if temp_bonus > best_fit_bonus:
                                 best_fit_bonus = temp_bonus
                                 truck_fits = t
                                 best_fit_reason = f"Lückenfüller (Restzeit {restzeit:.1f}h): +40"
                     
-                    # Wenn noch kein LKW mit Bonus gefunden wurde, nimm den ersten, der passt
                     if truck_fits is None:
                         truck_fits = t
                         
-            # Den Bonus zum Score addieren
             if best_fit_bonus > 0:
                 current_score += best_fit_bonus
                 current_bd.append(best_fit_reason)
@@ -177,7 +173,10 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
         best_cand["offene_fuhren"] -= 1
         truck_used_hours[best_truck] += best_cand["dauer_h"]
         truck_tour_counts[best_truck] += 1
-        current_last_product = best_cand["Produkt"]
+        
+        # Aktualisiere den Tracker NUR, wenn es Sägemehl oder Hackschnitzel war!
+        if best_cand["Produkt"] in ["1 - Sägemehl", "2 - Hackschnitzel"]:
+            current_last_sm_hs = best_cand["Produkt"]
         
         trip_obj = {
             "Tag": datum.isoformat() if isinstance(datum, (datetime.date, datetime.datetime)) else datum,

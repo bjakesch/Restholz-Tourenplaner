@@ -655,34 +655,47 @@ with tab_abholungen:
     
     current_ext_df = st.session_state.ext_terminal_db_by_week[week_str]
 
-    # RAW-Daten aus dem Editor abfangen und sofort durch den Sanitizer jagen!
-    edited_ext_db_raw = st.data_editor(
-        current_ext_df,
-        use_container_width=True,
-        num_rows="dynamic",
-        column_order=EXT_COL_ORDER,
-        column_config={
-            "Produkt / Artikel": st.column_config.SelectboxColumn("Produkt", options=PRODUCT_LIST, default="1 - Sägemehl"),
-            "Kunde": st.column_config.TextColumn("Kunde (Freitext)", default="", required=True),
-            "Frachtführer / Spedition": st.column_config.TextColumn("Spedition", default="", required=True),
-            "SOLL (Fuhren)": st.column_config.NumberColumn("SOLL", min_value=0, max_value=100, step=1, default=0),
-            "IST (Erfüllt)": st.column_config.NumberColumn("IST", min_value=0, max_value=100, step=1, default=0),
-            "Einsatztag": st.column_config.TextColumn("Tag(e) (z.B. Montag, Dienstag)", default=""),
-        },
-        hide_index=True,
-        key=f"ext_terminal_editor_{week_str}"
-    )
+    # 1. BEREICH: MASSENBEARBEITUNG IN EINEM FORMULAR (KEINE LIVE-UPDATES BEIM TIPPEN)
+    with st.form("ext_terminal_form"):
+        st.info("💡 **Massenbearbeitung:** Tippe hier in Ruhe deine Änderungen ein. Die App speichert und synchronisiert erst, wenn du unten auf den Speichern-Button klickst.")
+        
+        edited_ext_db_raw = st.data_editor(
+            current_ext_df,
+            use_container_width=True,
+            num_rows="dynamic",
+            column_order=EXT_COL_ORDER,
+            column_config={
+                "Produkt / Artikel": st.column_config.SelectboxColumn("Produkt", options=PRODUCT_LIST, default="1 - Sägemehl"),
+                "Kunde": st.column_config.TextColumn("Kunde (Freitext)", default="", required=True),
+                "Frachtführer / Spedition": st.column_config.TextColumn("Spedition", default="", required=True),
+                "SOLL (Fuhren)": st.column_config.NumberColumn("SOLL", min_value=0, max_value=100, step=1, default=0),
+                "IST (Erfüllt)": st.column_config.NumberColumn("IST", min_value=0, max_value=100, step=1, default=0),
+                "Einsatztag": st.column_config.TextColumn("Tag(e) (z.B. Montag, Dienstag)", default=""),
+            },
+            hide_index=True,
+            key=f"ext_terminal_editor_{week_str}"
+        )
+        
+        # Der Submit-Button blockiert alle Reruns, bis er gedrückt wird!
+        submitted = st.form_submit_button("💾 Änderungen dauerhaft speichern", type="primary")
 
-    edited_ext_db = sanitize_df(edited_ext_db_raw)
+    if submitted:
+        edited_ext_db = sanitize_df(edited_ext_db_raw)
+        if not edited_ext_db.equals(current_ext_df):
+            st.session_state.ext_terminal_db_by_week[week_str] = edited_ext_db
+            save_persistent_data()
+            st.success("Tabelle erfolgreich gespeichert!")
+            st.rerun()
 
-    if not edited_ext_db.equals(current_ext_df):
-        st.session_state.ext_terminal_db_by_week[week_str] = edited_ext_db
-        save_persistent_data()
-
-    if not edited_ext_db.empty:
+    st.divider()
+    
+    # 2. BEREICH: SCHNELL-VERBUCHUNG (Bleibt ausserhalb des Formulars für schnelles Klicken)
+    st.markdown("#### ⚡ Schnell-Verbuchung (+1)")
+    
+    if not current_ext_df.empty:
         col_sel, col_btn_ext = st.columns([3, 1])
         ext_options = []
-        for idx, row in edited_ext_db.iterrows():
+        for idx, row in current_ext_df.iterrows():
             prod = str(row.get("Produkt / Artikel", ""))
             cust = str(row.get("Kunde", "")).strip() or "Unbekannt"
             sped = str(row.get("Frachtführer / Spedition", "")).strip() or "Unbekannt"
@@ -691,7 +704,7 @@ with tab_abholungen:
         if ext_options:
             selected_ext_idx_str = col_sel.selectbox("Tour zum Verbuchen auswählen:", options=ext_options, key="ext_book_select")
             
-            if col_btn_ext.button("📌 +1 Verbuchen", use_container_width=True, type="primary"):
+            if col_btn_ext.button("📌 +1 Verbuchen", use_container_width=True):
                 row_idx = ext_options.index(selected_ext_idx_str)
                 
                 st.session_state.ext_terminal_db_by_week[week_str].at[row_idx, "IST (Erfüllt)"] += 1
@@ -707,36 +720,8 @@ with tab_abholungen:
                 save_persistent_data()
                 st.success("Fremdfuhre verbucht!")
                 st.rerun()
-
-# ------------------------------------------
-# TAB 5: KUNDENDATENBANK
-# ------------------------------------------
-with tab_kunden:
-    st.markdown("### 👥 Kundendatenbank (Stammdaten)")
-    
-    # RAW-Daten abfangen und direkt sanitizen
-    edited_cust_db_input_raw = st.data_editor(
-        st.session_state.customer_db,
-        num_rows="dynamic",
-        use_container_width=True,
-        column_order=["Kunde", "Umlaufzeit (hh:mm)", "1 - Sägemehl", "2 - Hackschnitzel", "3 - Rinde", "4 - Kappholz"],
-        column_config={
-            "Kunde": st.column_config.TextColumn("Kundenname", required=True),
-            "Umlaufzeit (hh:mm)": st.column_config.TextColumn("Umlaufzeit (hh:mm)", default="02:00", required=True),
-            "1 - Sägemehl": st.column_config.CheckboxColumn("Sägemehl", default=False),
-            "2 - Hackschnitzel": st.column_config.CheckboxColumn("Hackschnitzel", default=False),
-            "3 - Rinde": st.column_config.CheckboxColumn("Rinde", default=False),
-            "4 - Kappholz": st.column_config.CheckboxColumn("4 - Kappholz", default=False),
-        },
-        hide_index=True,
-        key="customer_editor_stable"
-    )
-    
-    edited_cust_db_input = sanitize_df(edited_cust_db_input_raw)
-    
-    if not edited_cust_db_input.equals(st.session_state.customer_db):
-        st.session_state.customer_db = edited_cust_db_input
-        save_persistent_data()
+    else:
+        st.info("Bitte lege zuerst oben im Kasten eine Abholung an.")
 
 # ------------------------------------------
 # TAB 6: LOGBUCH

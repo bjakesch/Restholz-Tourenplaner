@@ -400,9 +400,6 @@ with tab_dispo:
             schedule_by_day[d_str][t].append(trip)
             truck_used_hours[d_str][t] += trip["dauer_h"]
             remaining_quotas[(trip["Kunde"], trip["Produkt"])] -= 1
-            
-            if trip["Produkt"] in ["1 - Sägemehl", "2 - Hackschnitzel"]:
-                last_sm_hs_tracker = trip["Produkt"]
 
     t_cal, t_ausw = st.tabs(["📅 Planungskalender", "📊 Wochen-Auswertung"])
     

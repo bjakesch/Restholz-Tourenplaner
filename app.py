@@ -655,7 +655,7 @@ with tab_abholungen:
     
     current_ext_df = st.session_state.ext_terminal_db_by_week[week_str]
 
-    # 1. BEREICH: MASSENBEARBEITUNG IN EINEM FORMULAR (KEINE LIVE-UPDATES BEIM TIPPEN)
+    # 1. BEREICH: MASSENBEARBEITUNG IN EINEM FORMULAR
     with st.form("ext_terminal_form"):
         st.info("💡 **Massenbearbeitung:** Tippe hier in Ruhe deine Änderungen ein. Die App speichert und synchronisiert erst, wenn du unten auf den Speichern-Button klickst.")
         
@@ -676,10 +676,9 @@ with tab_abholungen:
             key=f"ext_terminal_editor_{week_str}"
         )
         
-        # Der Submit-Button blockiert alle Reruns, bis er gedrückt wird!
-        submitted = st.form_submit_button("💾 Änderungen dauerhaft speichern", type="primary")
+        submitted_ext = st.form_submit_button("💾 Änderungen dauerhaft speichern", type="primary")
 
-    if submitted:
+    if submitted_ext:
         edited_ext_db = sanitize_df(edited_ext_db_raw)
         if not edited_ext_db.equals(current_ext_df):
             st.session_state.ext_terminal_db_by_week[week_str] = edited_ext_db
@@ -689,7 +688,7 @@ with tab_abholungen:
 
     st.divider()
     
-    # 2. BEREICH: SCHNELL-VERBUCHUNG (Bleibt ausserhalb des Formulars für schnelles Klicken)
+    # 2. BEREICH: SCHNELL-VERBUCHUNG 
     st.markdown("#### ⚡ Schnell-Verbuchung (+1)")
     
     if not current_ext_df.empty:
@@ -722,6 +721,42 @@ with tab_abholungen:
                 st.rerun()
     else:
         st.info("Bitte lege zuerst oben im Kasten eine Abholung an.")
+
+# ------------------------------------------
+# TAB 5: KUNDENDATENBANK
+# ------------------------------------------
+with tab_kunden:
+    st.markdown("### 👥 Kundendatenbank (Stammdaten)")
+    
+    with st.form("customer_db_form"):
+        st.info("💡 **Massenbearbeitung:** Lege hier in Ruhe neue Kunden an. Die App speichert erst beim Klick auf den Button.")
+        
+        edited_cust_db_input_raw = st.data_editor(
+            st.session_state.customer_db,
+            num_rows="dynamic",
+            use_container_width=True,
+            column_order=["Kunde", "Umlaufzeit (hh:mm)", "1 - Sägemehl", "2 - Hackschnitzel", "3 - Rinde", "4 - Kappholz"],
+            column_config={
+                "Kunde": st.column_config.TextColumn("Kundenname", required=True),
+                "Umlaufzeit (hh:mm)": st.column_config.TextColumn("Umlaufzeit (hh:mm)", default="02:00", required=True),
+                "1 - Sägemehl": st.column_config.CheckboxColumn("Sägemehl", default=False),
+                "2 - Hackschnitzel": st.column_config.CheckboxColumn("Hackschnitzel", default=False),
+                "3 - Rinde": st.column_config.CheckboxColumn("Rinde", default=False),
+                "4 - Kappholz": st.column_config.CheckboxColumn("4 - Kappholz", default=False),
+            },
+            hide_index=True,
+            key="customer_editor_stable"
+        )
+        
+        submitted_cust = st.form_submit_button("💾 Kundendaten dauerhaft speichern", type="primary")
+
+    if submitted_cust:
+        edited_cust_db_input = sanitize_df(edited_cust_db_input_raw)
+        if not edited_cust_db_input.equals(st.session_state.customer_db):
+            st.session_state.customer_db = edited_cust_db_input
+            save_persistent_data()
+            st.success("Kundendatenbank erfolgreich aktualisiert!")
+            st.rerun()
 
 # ------------------------------------------
 # TAB 6: LOGBUCH

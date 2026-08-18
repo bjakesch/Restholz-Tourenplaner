@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import json
 from datetime import datetime, timedelta, date
-from zoneinfo import ZoneInfo  # NEU: Zeitzonen-Modul importieren
+from zoneinfo import ZoneInfo  
 
 from streamlit_autorefresh import st_autorefresh
 import database as db
@@ -27,7 +27,8 @@ st.markdown("""
     .cal-card { border-left: 4px solid #1b5e20; background-color: #ffffff; padding: 6px 8px; border-radius: 4px; margin-bottom: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-size: 0.85em; }
     .cal-card-manual { border-left: 4px solid #1976d2; background-color: #f5f9ff; }
     .cal-card-past { border-left: 4px solid #9e9e9e; background-color: #f5f5f5; color: #777;}
-    .stButton button { margin-top: 28px; }
+    /* Macht den Fix-Button (und Löschen-Buttons) extrem kompakt */
+    button[kind="secondary"] { padding-top: 0px !important; padding-bottom: 0px !important; min-height: 32px !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -189,7 +190,6 @@ with col_head:
 
 with col_date:
     st.write("") 
-    # NEU: Auch hier auf GERMAN_TZ umgestellt
     selected_date = st.date_input("📅 Planungswoche (beliebiger Tag)", value=datetime.now(GERMAN_TZ).date())
 
 with col_status:
@@ -307,6 +307,8 @@ with tab_dispo:
     m_truck = m_col4.selectbox("Fahrzeug", TRUCK_PRIO, key="m_truck_sel")
     m_dauer = cust_duration_map.get(m_kunde_raw, 2.0)
     
+    # NEU: Der Abstand für den Button wird hier exakt platziert
+    m_col5.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
     if m_col5.button("⚡ Verbuchen", use_container_width=True, type="primary") and m_kunde_raw != "-":
         d_str_manual = m_date.strftime("%Y-%m-%d")
         m_id = f"manual_{d_str_manual}_{m_truck}_{m_kunde_raw}_{m_prod}_{len(st.session_state.booked_trips)}"
@@ -439,9 +441,9 @@ with tab_dispo:
                             st.markdown(f"<div class='{card_class}'>{score_html}<strong>{tag_type} {trip.get('Zeitfenster', '')}</strong> | <b>{trip['Kunde']}</b><br><span style='color:#444;'>📦 {trip['Produkt'].split(' - ')[1] if ' - ' in trip['Produkt'] else trip['Produkt']}</span></div>", unsafe_allow_html=True)
                             
                             if not is_man and not is_past:
-                                if st.button(f"📌 Fixieren", key=f"btn_book_{d_str}_{t}_{trip['id']}"):
+                                # NEU: Gekürzter Text für den Button
+                                if st.button("📌 Fix", key=f"btn_book_{d_str}_{t}_{trip['id']}"):
                                     trip["is_manual"] = True
-                                    # NEU: Deutscher Zeitstempel beim Fixieren
                                     trip["created_at"] = datetime.now(GERMAN_TZ).timestamp()
                                     if trip.get('Zeitfenster') == "Manuell":
                                         trip['Zeitfenster'] = f"Tour {truck_tour_counts[d_str][t] + 1} (Fix)"
@@ -673,6 +675,8 @@ with tab_abholungen:
         if ext_options:
             selected_ext_idx_str = col_sel.selectbox("Tour zum Verbuchen auswählen:", options=ext_options, key="ext_book_select")
             
+            # NEU: Der Abstand für den Button wird hier exakt platziert
+            col_btn_ext.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
             if col_btn_ext.button("📌 +1 Verbuchen", use_container_width=True):
                 row_idx = ext_options.index(selected_ext_idx_str)
                 
@@ -680,7 +684,6 @@ with tab_abholungen:
                 booked_row = st.session_state.ext_terminal_db_by_week[week_str].iloc[row_idx]
                 
                 st.session_state.ext_booked_trips.append({
-                    # NEU: Deutscher Zeitstempel
                     "Zeitpunkt": datetime.now(GERMAN_TZ).strftime("%d.%m.%Y %H:%M"),
                     "Produkt": booked_row.get("Produkt / Artikel"),
                     "Kunde": booked_row.get("Kunde"),
@@ -783,6 +786,8 @@ with tab_logbuch:
             c_del1, c_del2 = st.columns([3, 1])
             selected_del_id = c_del1.selectbox("Tour stornieren:", options=[b.get("id") for b in week_own_trips if "id" in b], key="del_trip_select_box")
             
+            # NEU: Der Abstand für den Button wird hier exakt platziert
+            c_del2.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
             if c_del2.button("❌ Löschen", use_container_width=True, type="secondary", key="del_btn_own"):
                 st.session_state.booked_trips = [b for b in st.session_state.booked_trips if b.get("id") != selected_del_id]
                 save_persistent_data()
@@ -819,6 +824,8 @@ with tab_logbuch:
             
             selected_del_ext_str = c_del_ext1.selectbox("Fremdfuhre stornieren:", options=ext_del_options, key="del_ext_select_box")
             
+            # NEU: Der Abstand für den Button wird hier exakt platziert
+            c_del_ext2.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
             if c_del_ext2.button("❌ Löschen", use_container_width=True, type="secondary", key="del_btn_ext"):
                 idx_to_del = int(selected_del_ext_str.split(" | ")[0])
                 deleted_trip = st.session_state.ext_booked_trips.pop(idx_to_del)

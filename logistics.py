@@ -78,7 +78,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
         
     combined_sm_hs = bunker_levels.get("1 - Sägemehl", 50) + bunker_levels.get("2 - Hackschnitzel", 50)
     
-    # Ermittle global, welches Produkt den Bonus verdient hat (basierend auf echter Logbuch-Historie)
+    # Ermittle global, welches Produkt bei GLIECHSTAND bevorzugt werden soll
     bonus_product = None
     if last_sm_hs == "1 - Sägemehl":
         bonus_product = "2 - Hackschnitzel"
@@ -99,11 +99,8 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
                 dauer_h=kontingent.get("dauer_h", 2.0)
             )
             
-            # STARRER GLOBAL-BONUS FÜR ALLE OFFENEN KONTINGENTE DIESES PRODUKTS
-            if p_name == bonus_product:
-                base_score += 20
-                breakdown.append(f"Wechselbonus (Letzte echte Buchung fordert {p_name}): +20")
-                
+            # ACHTUNG: Der +20 Bonus wird hier NICHT mehr blind addiert!
+            
             candidates.append({
                 "Kunde": kontingent.get("kunde"),
                 "Produkt": p_name,
@@ -120,7 +117,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
     while True:
         best_cand_idx = -1
         best_truck = None
-        max_score = -1
+        max_eval = (-1, -1, -1) # Prüf-Tupel: (Score, Dauer, Wechsel-Bonus-Flag)
         best_breakdown_str = ""
         
         for i, cand in enumerate(candidates):
@@ -129,6 +126,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
                 
             current_score = cand["base_score"]
             current_bd = cand["breakdown"].copy()
+            p_name = cand["Produkt"]
             
             # Finde den am besten passenden LKW (Tetris-Logik)
             truck_fits = None
@@ -156,15 +154,26 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
                 current_score += best_fit_bonus
                 current_bd.append(best_fit_reason)
                 
-            # Tie-Breaker: Längere Dauer bevorzugen
             if truck_fits is not None:
-                score_with_tiebreaker = current_score + (cand["dauer_h"] * 0.1)
+                # Ist dies das abwechselnde Produkt? (1 = Ja, 0 = Nein)
+                is_alternating = 1 if p_name == bonus_product else 0
                 
-                if score_with_tiebreaker > max_score:
-                    max_score = score_with_tiebreaker
+                # Das Tupel entscheidet automatisch exakt in dieser Reihenfolge:
+                # 1. Den echten Punktestand (Score)
+                # 2. Die längere Tour (Dauer)
+                # 3. Das abwechselnde Produkt (nur bei absolutem Gleichstand)
+                eval_tuple = (current_score, cand["dauer_h"], is_alternating)
+                
+                if eval_tuple > max_eval:
+                    max_eval = eval_tuple
                     best_cand_idx = i
                     best_truck = truck_fits
-                    best_breakdown_str = "\n".join(current_bd)
+                    
+                    # Optional: Vermerken, falls dieser Tie-Breaker gegriffen hat
+                    final_bd = current_bd.copy()
+                    if is_alternating:
+                        final_bd.append("Tie-Breaker: Produkt-Wechsel bevorzugt")
+                    best_breakdown_str = "\n".join(final_bd)
                     
         if best_cand_idx == -1:
             break 
@@ -183,7 +192,7 @@ def calculate_tours(datum, offene_kontingente, blocked_trucks=None, extra_driver
             "Produkt": best_cand["Produkt"],
             "Menge_m3": truck_cap,
             "dauer_h": best_cand["dauer_h"],
-            "score": int(max_score),
+            "score": int(max_eval[0]), # Wir speichern nur den sauberen, echten Score ab!
             "score_details": best_breakdown_str, 
             "is_manual": False,
             "Bemerkung": best_cand["rest_req"]

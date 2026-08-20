@@ -215,48 +215,10 @@ week_str = start_of_week.strftime("%Y-%m-%d")
 if "ext_terminal_db_by_week" not in st.session_state:
     st.session_state["ext_terminal_db_by_week"] = {}
     
-# Prüfen, ob wir die Woche neu aufbauen müssen (weil sie nicht existiert ODER leer ist)
-current_week_df = st.session_state["ext_terminal_db_by_week"].get(week_str)
-needs_setup = False
-
-if current_week_df is None or current_week_df.empty:
-    needs_setup = True
-elif "Kunde" in current_week_df.columns:
-    # Wenn alle Kundenfelder in dieser Woche nur leerer Text sind, ist die Tabelle nutzlos -> Neu aufbauen!
-    if not (current_week_df["Kunde"].astype(str).str.strip() != "").any():
-        needs_setup = True
-
-if needs_setup:
-    valid_weeks = []
-    # Suche alle Wochen durch, um eine Vorlage zu finden
-    for w, df in st.session_state["ext_terminal_db_by_week"].items():
-        if w != week_str and not df.empty and "Kunde" in df.columns:
-            if (df["Kunde"].astype(str).str.strip() != "").any():
-                valid_weeks.append(w)
-                
-    if valid_weeks:
-        # Letzte echte Daten-Woche VOR der aktuellen finden
-        past_weeks = [w for w in valid_weeks if w < week_str]
-        last_w = max(past_weeks) if past_weeks else max(valid_weeks)
-        
-        df_template = st.session_state["ext_terminal_db_by_week"][last_w].copy()
-        
-        # Leere Zeilen aussortieren
-        df_template = df_template[df_template["Kunde"].astype(str).str.strip() != ""]
-        
-        # Werte nullen
-        if not df_template.empty:
-            df_template["SOLL (Fuhren)"] = 0
-            df_template["IST (Erfüllt)"] = 0
-            if "Einsatztag" in df_template.columns:
-                df_template["Einsatztag"] = ""
-            if "Bemerkung / Uhrzeit" in df_template.columns:
-                df_template["Bemerkung / Uhrzeit"] = ""
-                
-        st.session_state["ext_terminal_db_by_week"][week_str] = sanitize_df(df_template)
-    else:
-        st.session_state["ext_terminal_db_by_week"][week_str] = pd.DataFrame(columns=EXT_COL_ORDER)
-        
+# GANZ SIMPEL: Wenn die Woche noch nicht existiert, bleibt sie leer! 
+# (Denn alle relevanten Vorlagen werden beim Speichern aktiv 4 Wochen nach vorne gepusht)
+if week_str not in st.session_state["ext_terminal_db_by_week"]:
+    st.session_state["ext_terminal_db_by_week"][week_str] = pd.DataFrame(columns=EXT_COL_ORDER)
     save_persistent_data()
 
 edited_cust_db = st.session_state.customer_db

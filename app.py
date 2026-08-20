@@ -689,7 +689,7 @@ with tab_abholungen:
     st.divider()
 
     with st.form("ext_terminal_form"):
-        st.info("💡 **Massenbearbeitung:** Die Tabelle wird beim Speichern automatisch (genullt) in die nächsten 4 Wochen projiziert. Bereits verplante zukünftige Zeilen bleiben geschützt!")
+        st.info("💡 **Massenbearbeitung:** Du kannst deine Änderungen nun einfach nur für diese Woche speichern ODER sie zusätzlich als leere Vorlage in die nächsten 2 Wochen kopieren.")
         
         edited_ext_db_raw = st.data_editor(
             current_ext_df,
@@ -708,16 +708,21 @@ with tab_abholungen:
             key=f"ext_terminal_editor_{week_str}"
         )
         
-        submitted_ext = st.form_submit_button("💾 Änderungen speichern & Vorlage auf 4 Wochen übertragen", type="primary")
+        c_btn1, c_btn2 = st.columns(2)
+        with c_btn1:
+            submitted_save = st.form_submit_button("💾 Nur für diese Woche speichern", type="primary")
+        with c_btn2:
+            submitted_project = st.form_submit_button("🚀 Speichern & als Vorlage (nächste 2 Wochen)", type="secondary")
 
-    if submitted_ext:
+    if submitted_save or submitted_project:
         edited_ext_db = sanitize_df(edited_ext_db_raw)
         
+        # Zuerst: Immer die aktuelle Woche speichern
         if not edited_ext_db.equals(current_ext_df):
             st.session_state.ext_terminal_db_by_week[week_str] = edited_ext_db
             
-            # --- START DER 4-WOCHEN-SYNCHRONISATION ---
-            
+        # Wenn der Vorlagen-Button geklickt wurde, startet die Kopier-Logik
+        if submitted_project:
             # 1. Wir filtern leere (unvollständige) Zeilen für die Kopiervorlage heraus
             base_template = edited_ext_db[edited_ext_db["Kunde"].astype(str).str.strip() != ""].copy()
             
@@ -730,8 +735,8 @@ with tab_abholungen:
             
             current_date = datetime.strptime(week_str, "%Y-%m-%d").date()
             
-            # 3. Kopieren für Woche 1, 2, 3 und 4 in der Zukunft
-            for i in range(1, 5):
+            # 3. Kopieren für Woche 1 und 2 in der Zukunft
+            for i in range(1, 3):
                 target_date = current_date + timedelta(days=7*i)
                 target_w = target_date.strftime("%Y-%m-%d")
                 
@@ -742,7 +747,6 @@ with tab_abholungen:
                     st.session_state.ext_terminal_db_by_week[target_w] = sanitize_df(base_template)
                 else:
                     # Zukunft hat schon Daten -> Wir müssen SCHÜTZEN!
-                    # Identifiziere alle Zeilen in der Zukunft, in die schon manuell geplant wurde:
                     protected_mask = (
                         (pd.to_numeric(target_df["SOLL (Fuhren)"], errors='coerce').fillna(0) > 0) | 
                         (pd.to_numeric(target_df["IST (Erfüllt)"], errors='coerce').fillna(0) > 0) | 
@@ -754,17 +758,19 @@ with tab_abholungen:
                     # Klebe die geschützten Zeilen OBEN auf die leere Vorlage
                     combined = pd.concat([protected_rows, base_template], ignore_index=True)
                     
-                    # Entferne doppelte Speditionen/Kunden. 
-                    # keep="first" bedeutet: Da die geschützten Zeilen oben stehen, gewinnen sie!
+                    # Entferne doppelte Speditionen/Kunden (die geschützten gewinnen)
                     combined = combined.drop_duplicates(subset=["Produkt / Artikel", "Kunde", "Frachtführer / Spedition"], keep="first")
                     
                     st.session_state.ext_terminal_db_by_week[target_w] = sanitize_df(combined)
-            
-            # --- ENDE DER SYNCHRONISATION ---
 
-            save_persistent_data()
-            st.success("Tabelle gespeichert und in die nächsten 4 Wochen synchronisiert!")
-            st.rerun()
+        save_persistent_data()
+        
+        if submitted_project:
+            st.success("Tabelle gespeichert und als Vorlage in die nächsten 2 Wochen übertragen!")
+        else:
+            st.success("Tabelle erfolgreich für diese Woche gespeichert!")
+            
+        st.rerun()
 
 # ------------------------------------------
 # TAB 5: KUNDENDATENBANK

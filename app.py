@@ -216,19 +216,37 @@ if "ext_terminal_db_by_week" not in st.session_state:
     st.session_state["ext_terminal_db_by_week"] = {}
     
 if week_str not in st.session_state["ext_terminal_db_by_week"]:
-    if st.session_state["ext_terminal_db_by_week"]:
-        last_w = max(st.session_state["ext_terminal_db_by_week"].keys())
-        df_last = st.session_state["ext_terminal_db_by_week"][last_w].copy()
-        if not df_last.empty:
-            df_last["SOLL (Fuhren)"] = 0
-            df_last["IST (Erfüllt)"] = 0
-            if "Einsatztag" in df_last.columns:
-                df_last["Einsatztag"] = ""
-            if "Bemerkung / Uhrzeit" in df_last.columns:
-                df_last["Bemerkung / Uhrzeit"] = ""
-        st.session_state["ext_terminal_db_by_week"][week_str] = sanitize_df(df_last)
+    # NEU: Suche aktiv nach der letzten Woche, die WIRKLICH Daten enthält!
+    valid_weeks = []
+    for w, df in st.session_state["ext_terminal_db_by_week"].items():
+        if not df.empty and "Kunde" in df.columns:
+            # Prüfen, ob es echte Einträge gibt (Kunde ist nicht leer)
+            if (df["Kunde"].astype(str).str.strip() != "").any():
+                valid_weeks.append(w)
+                
+    if valid_weeks:
+        # Finde die letzte "echte" Woche chronologisch vor der neu ausgewählten Woche
+        past_weeks = [w for w in valid_weeks if w < week_str]
+        last_w = max(past_weeks) if past_weeks else max(valid_weeks)
+        
+        df_template = st.session_state["ext_terminal_db_by_week"][last_w].copy()
+        
+        # 1. Alle leeren Platzhalter-Zeilen (ohne Kunde) rigoros aussortieren
+        df_template = df_template[df_template["Kunde"].astype(str).str.strip() != ""]
+        
+        # 2. Tages- und Wochenwerte für den Start in die neue Woche zurücksetzen
+        if not df_template.empty:
+            df_template["SOLL (Fuhren)"] = 0
+            df_template["IST (Erfüllt)"] = 0
+            if "Einsatztag" in df_template.columns:
+                df_template["Einsatztag"] = ""
+            if "Bemerkung / Uhrzeit" in df_template.columns:
+                df_template["Bemerkung / Uhrzeit"] = ""
+                
+        st.session_state["ext_terminal_db_by_week"][week_str] = sanitize_df(df_template)
     else:
         st.session_state["ext_terminal_db_by_week"][week_str] = pd.DataFrame(columns=EXT_COL_ORDER)
+        
     save_persistent_data()
 
 edited_cust_db = st.session_state.customer_db

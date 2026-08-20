@@ -665,7 +665,6 @@ with tab_abholungen:
         if ext_options:
             selected_ext_idx_str = col_sel.selectbox("Tour zum Verbuchen auswählen:", options=ext_options, key="ext_book_select")
             
-            # NEU: Der Abstand für den Button wird hier exakt platziert
             col_btn_ext.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
             if col_btn_ext.button("📌 +1 Verbuchen", use_container_width=True):
                 row_idx = ext_options.index(selected_ext_idx_str)
@@ -690,7 +689,7 @@ with tab_abholungen:
     st.divider()
 
     with st.form("ext_terminal_form"):
-        st.info("💡 **Massenbearbeitung:** Tippe hier in Ruhe deine Änderungen ein. Die App speichert und synchronisiert erst, wenn du unten auf den Speichern-Button klickst.")
+        st.info("💡 **Massenbearbeitung:** Die Tabelle wird beim Speichern automatisch (genullt) in die nächsten 4 Wochen projiziert. Bereits verplante zukünftige Zeilen bleiben geschützt!")
         
         edited_ext_db_raw = st.data_editor(
             current_ext_df,
@@ -709,14 +708,62 @@ with tab_abholungen:
             key=f"ext_terminal_editor_{week_str}"
         )
         
-        submitted_ext = st.form_submit_button("💾 Änderungen dauerhaft speichern", type="primary")
+        submitted_ext = st.form_submit_button("💾 Änderungen speichern & Vorlage auf 4 Wochen übertragen", type="primary")
 
     if submitted_ext:
         edited_ext_db = sanitize_df(edited_ext_db_raw)
+        
         if not edited_ext_db.equals(current_ext_df):
             st.session_state.ext_terminal_db_by_week[week_str] = edited_ext_db
+            
+            # --- START DER 4-WOCHEN-SYNCHRONISATION ---
+            
+            # 1. Wir filtern leere (unvollständige) Zeilen für die Kopiervorlage heraus
+            base_template = edited_ext_db[edited_ext_db["Kunde"].astype(str).str.strip() != ""].copy()
+            
+            # 2. Werte auf Null/Leer setzen für die Vorlage
+            if not base_template.empty:
+                base_template["SOLL (Fuhren)"] = 0
+                base_template["IST (Erfüllt)"] = 0
+                base_template["Einsatztag"] = ""
+                base_template["Bemerkung / Uhrzeit"] = ""
+            
+            current_date = datetime.strptime(week_str, "%Y-%m-%d").date()
+            
+            # 3. Kopieren für Woche 1, 2, 3 und 4 in der Zukunft
+            for i in range(1, 5):
+                target_date = current_date + timedelta(days=7*i)
+                target_w = target_date.strftime("%Y-%m-%d")
+                
+                target_df = st.session_state.ext_terminal_db_by_week.get(target_w, pd.DataFrame(columns=EXT_COL_ORDER))
+                
+                if target_df.empty:
+                    # Zukunft ist komplett leer -> Einfach Vorlage einfügen
+                    st.session_state.ext_terminal_db_by_week[target_w] = sanitize_df(base_template)
+                else:
+                    # Zukunft hat schon Daten -> Wir müssen SCHÜTZEN!
+                    # Identifiziere alle Zeilen in der Zukunft, in die schon manuell geplant wurde:
+                    protected_mask = (
+                        (pd.to_numeric(target_df["SOLL (Fuhren)"], errors='coerce').fillna(0) > 0) | 
+                        (pd.to_numeric(target_df["IST (Erfüllt)"], errors='coerce').fillna(0) > 0) | 
+                        (target_df["Einsatztag"].astype(str).str.strip() != "") | 
+                        (target_df["Bemerkung / Uhrzeit"].astype(str).str.strip() != "")
+                    )
+                    protected_rows = target_df[protected_mask]
+                    
+                    # Klebe die geschützten Zeilen OBEN auf die leere Vorlage
+                    combined = pd.concat([protected_rows, base_template], ignore_index=True)
+                    
+                    # Entferne doppelte Speditionen/Kunden. 
+                    # keep="first" bedeutet: Da die geschützten Zeilen oben stehen, gewinnen sie!
+                    combined = combined.drop_duplicates(subset=["Produkt / Artikel", "Kunde", "Frachtführer / Spedition"], keep="first")
+                    
+                    st.session_state.ext_terminal_db_by_week[target_w] = sanitize_df(combined)
+            
+            # --- ENDE DER SYNCHRONISATION ---
+
             save_persistent_data()
-            st.success("Tabelle erfolgreich gespeichert!")
+            st.success("Tabelle gespeichert und in die nächsten 4 Wochen synchronisiert!")
             st.rerun()
 
 # ------------------------------------------

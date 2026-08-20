@@ -689,7 +689,7 @@ with tab_abholungen:
     st.divider()
 
     with st.form("ext_terminal_form"):
-        st.info("💡 **Massenbearbeitung:** Du kannst deine Änderungen nun einfach nur für diese Woche speichern ODER sie zusätzlich als leere Vorlage in die nächsten 2 Wochen kopieren.")
+        st.info("💡 **Massenbearbeitung:** Mit 'Speichern' werden die Daten für diese Woche gesichert. Mit 'Als Vorlage übernehmen' projizierst du die aktuelle Ansicht als leere Vorlage (nur) in die nächsten 2 Wochen.")
         
         edited_ext_db_raw = st.data_editor(
             current_ext_df,
@@ -710,66 +710,65 @@ with tab_abholungen:
         
         c_btn1, c_btn2 = st.columns(2)
         with c_btn1:
-            submitted_save = st.form_submit_button("💾 Nur für diese Woche speichern", type="primary")
+            submitted_save = st.form_submit_button("💾 Speichern", type="primary")
         with c_btn2:
-            submitted_project = st.form_submit_button("🚀 Speichern & als Vorlage (nächste 2 Wochen)", type="secondary")
+            submitted_project = st.form_submit_button("🚀 Als Vorlage übernehmen", type="secondary")
 
-    if submitted_save or submitted_project:
+    # LOGIK FÜR DEN BUTTON "SPEICHERN" (nur aktuelle Woche)
+    if submitted_save:
         edited_ext_db = sanitize_df(edited_ext_db_raw)
-        
-        # Zuerst: Immer die aktuelle Woche speichern
         if not edited_ext_db.equals(current_ext_df):
             st.session_state.ext_terminal_db_by_week[week_str] = edited_ext_db
+            save_persistent_data()
+        st.success("Tabelle erfolgreich für diese Woche gespeichert!")
+        st.rerun()
+
+    # LOGIK FÜR DEN BUTTON "ALS VORLAGE ÜBERNEHMEN" (nur Kopiervorgang 2 Wochen nach vorne)
+    if submitted_project:
+        edited_ext_db = sanitize_df(edited_ext_db_raw)
+        
+        # 1. Wir filtern leere (unvollständige) Zeilen für die Kopiervorlage heraus
+        base_template = edited_ext_db[edited_ext_db["Kunde"].astype(str).str.strip() != ""].copy()
+        
+        # 2. Werte auf Null/Leer setzen für die Vorlage
+        if not base_template.empty:
+            base_template["SOLL (Fuhren)"] = 0
+            base_template["IST (Erfüllt)"] = 0
+            base_template["Einsatztag"] = ""
+            base_template["Bemerkung / Uhrzeit"] = ""
+        
+        current_date = datetime.strptime(week_str, "%Y-%m-%d").date()
+        
+        # 3. Kopieren für Woche 1 und 2 in der Zukunft
+        for i in range(1, 3):
+            target_date = current_date + timedelta(days=7*i)
+            target_w = target_date.strftime("%Y-%m-%d")
             
-        # Wenn der Vorlagen-Button geklickt wurde, startet die Kopier-Logik
-        if submitted_project:
-            # 1. Wir filtern leere (unvollständige) Zeilen für die Kopiervorlage heraus
-            base_template = edited_ext_db[edited_ext_db["Kunde"].astype(str).str.strip() != ""].copy()
+            target_df = st.session_state.ext_terminal_db_by_week.get(target_w, pd.DataFrame(columns=EXT_COL_ORDER))
             
-            # 2. Werte auf Null/Leer setzen für die Vorlage
-            if not base_template.empty:
-                base_template["SOLL (Fuhren)"] = 0
-                base_template["IST (Erfüllt)"] = 0
-                base_template["Einsatztag"] = ""
-                base_template["Bemerkung / Uhrzeit"] = ""
-            
-            current_date = datetime.strptime(week_str, "%Y-%m-%d").date()
-            
-            # 3. Kopieren für Woche 1 und 2 in der Zukunft
-            for i in range(1, 3):
-                target_date = current_date + timedelta(days=7*i)
-                target_w = target_date.strftime("%Y-%m-%d")
+            if target_df.empty:
+                # Zukunft ist komplett leer -> Einfach Vorlage einfügen
+                st.session_state.ext_terminal_db_by_week[target_w] = sanitize_df(base_template)
+            else:
+                # Zukunft hat schon Daten -> Wir müssen SCHÜTZEN!
+                protected_mask = (
+                    (pd.to_numeric(target_df["SOLL (Fuhren)"], errors='coerce').fillna(0) > 0) | 
+                    (pd.to_numeric(target_df["IST (Erfüllt)"], errors='coerce').fillna(0) > 0) | 
+                    (target_df["Einsatztag"].astype(str).str.strip() != "") | 
+                    (target_df["Bemerkung / Uhrzeit"].astype(str).str.strip() != "")
+                )
+                protected_rows = target_df[protected_mask]
                 
-                target_df = st.session_state.ext_terminal_db_by_week.get(target_w, pd.DataFrame(columns=EXT_COL_ORDER))
+                # Klebe die geschützten Zeilen OBEN auf die leere Vorlage
+                combined = pd.concat([protected_rows, base_template], ignore_index=True)
                 
-                if target_df.empty:
-                    # Zukunft ist komplett leer -> Einfach Vorlage einfügen
-                    st.session_state.ext_terminal_db_by_week[target_w] = sanitize_df(base_template)
-                else:
-                    # Zukunft hat schon Daten -> Wir müssen SCHÜTZEN!
-                    protected_mask = (
-                        (pd.to_numeric(target_df["SOLL (Fuhren)"], errors='coerce').fillna(0) > 0) | 
-                        (pd.to_numeric(target_df["IST (Erfüllt)"], errors='coerce').fillna(0) > 0) | 
-                        (target_df["Einsatztag"].astype(str).str.strip() != "") | 
-                        (target_df["Bemerkung / Uhrzeit"].astype(str).str.strip() != "")
-                    )
-                    protected_rows = target_df[protected_mask]
-                    
-                    # Klebe die geschützten Zeilen OBEN auf die leere Vorlage
-                    combined = pd.concat([protected_rows, base_template], ignore_index=True)
-                    
-                    # Entferne doppelte Speditionen/Kunden (die geschützten gewinnen)
-                    combined = combined.drop_duplicates(subset=["Produkt / Artikel", "Kunde", "Frachtführer / Spedition"], keep="first")
-                    
-                    st.session_state.ext_terminal_db_by_week[target_w] = sanitize_df(combined)
+                # Entferne doppelte Speditionen/Kunden (die geschützten gewinnen)
+                combined = combined.drop_duplicates(subset=["Produkt / Artikel", "Kunde", "Frachtführer / Spedition"], keep="first")
+                
+                st.session_state.ext_terminal_db_by_week[target_w] = sanitize_df(combined)
 
         save_persistent_data()
-        
-        if submitted_project:
-            st.success("Tabelle gespeichert und als Vorlage in die nächsten 2 Wochen übertragen!")
-        else:
-            st.success("Tabelle erfolgreich für diese Woche gespeichert!")
-            
+        st.success("Tabelle erfolgreich als Vorlage in die nächsten 2 Wochen übertragen!")
         st.rerun()
 
 # ------------------------------------------

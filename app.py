@@ -190,7 +190,7 @@ with col_head:
 
 with col_date:
     st.write("") 
-    selected_date = st.date_input("📅 Planungswoche (beliebiger Tag)", value=datetime.now(GERMAN_TZ).date())
+    selected_date = st.date_input("📅 Planungswoche (beliebiger Tag)", value=datetime.now(GERMAN_TZ).date(), format="DD.MM.YYYY")
 
 with col_status:
     st.write("") 
@@ -293,7 +293,7 @@ with tab_dispo:
     
     m_kunde_raw = m_col1.selectbox("Kunde", cust_keys, key="m_kunde_sel")
     m_prod = m_col2.selectbox("Produkt", PRODUCT_LIST, key="m_prod_sel")
-    m_date = m_col3.date_input("Datum", value=selected_date, key="m_date_sel")
+    m_date = m_col3.date_input("Datum", value=selected_date, key="m_date_sel", format="DD.MM.YYYY")
     m_truck = m_col4.selectbox("Fahrzeug", TRUCK_PRIO, key="m_truck_sel")
     m_dauer = cust_duration_map.get(m_kunde_raw, 2.0)
     
@@ -624,7 +624,7 @@ with tab_kontingente:
     st.markdown("#### 🚫 Kundensperren / Annahmestopp")
     
     c_block1, c_block2 = st.columns([1, 2])
-    block_date = c_block1.date_input("Datum für Sperre auswählen:", value=selected_date, key="block_date_input")
+    block_date = c_block1.date_input("Datum für Sperre auswählen:", value=selected_date, key="block_date_input", format="DD.MM.YYYY")
     block_date_str = block_date.strftime("%Y-%m-%d")
 
     current_blocked = st.session_state.get("blocked_customers", {}).get(block_date_str, [])
